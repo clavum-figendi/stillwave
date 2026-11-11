@@ -4,6 +4,17 @@ Offline-first generative soundscapes for focus, relaxation, sleep and meditation
 A static web PWA and a bundled Android app: no accounts, subscriptions, audio
 streaming, analytics, external fonts or paid generation APIs.
 
+## Get Stillwave
+
+- **Web app:** https://clavum-figendi.github.io/stillwave/
+- **Android 1.0.1:** signed APK in the [release](https://github.com/clavum-figendi/stillwave/releases/tag/v1.0.1).
+- **Runtime evidence:** [Android 8, 10 and 15 emulator run](https://github.com/clavum-figendi/stillwave/actions/runs/43114537411),
+  including cold offline start, UI controls, notification transport and screen-off
+  native playback. Physical-device/OEM battery behavior is not yet measured.
+
+The Android update uses the same package and signing identity as the 1.0.0 test
+build. Install it over the test build to retain local app data.
+
 ## Offline use
 
 - **Web:** open the hosted app online once, use the offline-save/check control and

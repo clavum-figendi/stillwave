@@ -1,6 +1,6 @@
 # Stillwave Android
 
-Native Java Android app: `net.stillwave.app`, version `1.0.0` (1), minimum API 26,
+Native Java Android app: `net.stillwave.app`, version `1.0.1` (2), minimum API 26,
 compile/target API 35. Java 17, Gradle wrapper 8.9 (distribution SHA-256 pinned),
 Android Gradle Plugin 8.7.3. No AndroidX or other runtime dependencies.
 
@@ -163,7 +163,16 @@ bundle; Android tests poll its actual initialized controls and start playback by
 clicking the real player button. Source freshness and legacy-runtime regressions
 are also checked before CI packaging.
 
-**Still requires runtime verification:** cold airplane-mode launch and native
-background playback on the API26/29/35 CI emulators. There is no KVM on the
-local development host. Syntax parsing and modern-Chromium compatibility tests
-are not substituted for a successful Android runtime test.
+**Runtime verification passed:** [CI run 43114537411](https://github.com/clavum-figendi/stillwave/actions/runs/43114537411)
+passed on API26, API29 and API35 (Android 8, 10 and 15). Each job cold-launched
+after clearing app data with airplane mode enabled, Wi-Fi disabled and no active
+default network. The tests exercised the actual player button, native AudioTrack
+frames, pause/resume/stop, notification controls, screen-off playback, wake-lock
+release and notification cleanup. Android 13+ notifications were denied.
+
+The emulator runtime tests used the debug APK of the same production source.
+The signed release was separately checked for signature identity, version,
+permissions, ZIP integrity and byte-for-byte bundled-asset parity. Physical
+phones, OEM battery restrictions and long-session acoustic/battery performance
+remain untested. No rooting is required to install or run Stillwave; only old
+CI emulator images use privileged test setup to switch off their radios.
