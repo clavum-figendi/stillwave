@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -29,12 +29,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # GitHub's pinned Ubuntu image includes the SDK. Avoid setup-android's
+      # obsolete default `tools` package, which Google no longer publishes.
+      - name: Verify preinstalled SDK
+        run: test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: Install pinned Android build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "build-tools;34.0.0"'
       - name: Decode signing key outside source
         env:
           KEYSTORE_B64: ${{ secrets.STILLWAVE_KEYSTORE_B64 }}
@@ -80,7 +83,7 @@ jobs:
         run: rm -f "$RUNNER_TEMP/stillwave-release.jks"
   offline-emulator:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
