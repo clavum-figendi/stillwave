@@ -1,0 +1,80 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'net.stillwave.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'net.stillwave.app'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+        testInstrumentationRunner 'net.stillwave.app.OfflineInstrumentation'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    def signingNames = ['STILLWAVE_KEYSTORE', 'STILLWAVE_STORE_PASSWORD', 'STILLWAVE_KEY_PASSWORD']
+    def availableSigning = signingNames.every { System.getenv(it) }
+    if (signingNames.any { System.getenv(it) } && !availableSigning) {
+        throw new GradleException('Incomplete release signing environment; all three STILLWAVE signing variables are required.')
+    }
+    signingConfigs {
+        if (availableSigning) {
+            release {
+                storeFile file(System.getenv('STILLWAVE_KEYSTORE'))
+                storePassword System.getenv('STILLWAVE_STORE_PASSWORD')
+                keyAlias 'stillwave'
+                keyPassword System.getenv('STILLWAVE_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (availableSigning) signingConfig signingConfigs.release
+        }
+    }
+    lint { abortOnError true; checkReleaseBuilds true }
+    testOptions { animationsDisabled true }
+}
+
+// Never depend on a developer manually copying stale web assets. Sync deletes stale files.
+def bundleWeb = tasks.register('bundleWeb', Sync) {
+    from rootProject.file('../web')
+    into layout.projectDirectory.dir('src/main/assets/web')
+    doFirst {
+        if (!rootProject.file('../web/index.html').isFile()) {
+            throw new GradleException('Missing ../web/index.html: supply the real Stillwave UI before building.')
+        }
+    }
+}
+tasks.configureEach { task ->
+    if ((task.name.startsWith('merge') && task.name.endsWith('Assets')) || task.name.toLowerCase().contains('lint') || task.name == 'preBuild') task.dependsOn(bundleWeb)
+}
+// The same dependency-free suite runs locally and under Gradle/CI without JUnit downloads.
+def compileCore = tasks.register('compileCoreTests', JavaCompile) {
+    source = files(fileTree('src/main/java/net/stillwave/audio') { include '*.java' }, rootProject.fileTree('core-tests') { include '**/*.java' })
+    classpath = files()
+    destinationDirectory = layout.buildDirectory.dir('core-tests')
+    options.release = 17
+}
+tasks.register('coreTest', JavaExec) {
+    dependsOn compileCore
+    classpath = files(compileCore.map { it.destinationDirectory })
+    mainClass = 'net.stillwave.audio.CoreTests'
+}
+def compileWorker = tasks.register('compileWorkerTests', JavaCompile) {
+    source = files(fileTree('src/main/java/net/stillwave/audio') { include '*.java' },
+            file('src/main/java/net/stillwave/app/AudioEngine.java'),
+            rootProject.fileTree('worker-tests') { include '**/*.java' })
+    classpath = files()
+    destinationDirectory = layout.buildDirectory.dir('worker-tests')
+    options.release = 17
+}
+tasks.register('workerTest', JavaExec) {
+    dependsOn compileWorker
+    classpath = files(compileWorker.map { it.destinationDirectory })
+    mainClass = 'net.stillwave.app.WorkerTests'
+}
+tasks.named('coreTest') { dependsOn 'workerTest' }
+tasks.named('check') { dependsOn 'coreTest' }
+tasks.matching { it.name == 'test' }.configureEach { dependsOn 'coreTest' }
