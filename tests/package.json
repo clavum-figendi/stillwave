@@ -1,0 +1,14 @@
+{
+  "name": "stillwave-web-verification",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-web.mjs",
+    "check:build": "node build-web.mjs --check",
+    "test": "node --test *.test.mjs"
+  },
+  "devDependencies": {
+    "acorn": "8.15.0",
+    "esbuild": "0.25.12"
+  }
+}
