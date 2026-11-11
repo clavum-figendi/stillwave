@@ -26,7 +26,11 @@ fi
 bash "$ROOT/android/prepare-offline-device.sh" "$API"
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
-adb logcat -c
+# Clearing historical logs is not a prerequisite for testing the application.
+# Old emulator logd can refuse the clear even when offline setup succeeded.
+if ! timeout 15s adb logcat -c; then
+  printf '%s\n' 'Warning: log buffer could not be cleared; retaining timestamped history.' >&2
+fi
 set +e
 timeout 240s adb shell am instrument -w -r net.stillwave.app.test/net.stillwave.app.OfflineInstrumentation | tee "$LOG_DIR/instrumentation.txt"
 INSTRUMENT_STATUS=("${PIPESTATUS[@]}")

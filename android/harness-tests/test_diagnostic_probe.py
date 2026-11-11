@@ -55,6 +55,9 @@ printf '%s\\n' "$*" >> "$COMMAND_LOG"
 case "$*" in
  'shell getprop ro.build.version.sdk') echo 35;;
  'shell settings get global wifi_on'|'shell settings get global mobile_data') echo 0;;
+ 'shell settings get global airplane_mode_on') echo 1;;
+ 'shell dumpsys connectivity') echo 'Active default network: none';;
+ 'logcat -c') if [[ ${FAIL_STAGE:-} == logclear ]]; then exit 1; fi;;
  'shell am instrument '*) printf 'INSTRUMENTATION_CODE: -1\\nStillwave: 1 offline integration test passed\\n';;
  'logcat -d') echo 'mock logcat diagnostic';;
  'shell dumpsys '*) echo 'mock dumpsys diagnostic';;
@@ -62,11 +65,11 @@ case "$*" in
 esac
 ''')
             for command in ('timeout', 'adb'): (base / command).chmod(0o755)
-            for stage in ('success', 'install', 'instrument'):
+            for stage in ('success', 'logclear', 'install', 'instrument'):
                 logdir = base / stage
                 env = dict(os.environ, PATH=str(base) + ':' + os.environ['PATH'], STILLWAVE_TEST_LOG_DIR=str(logdir), COMMAND_LOG=str(base / 'commands'), FAIL_STAGE=stage)
                 result = subprocess.run(['bash', str(ROOT / 'android/ci-offline-test.sh')], env=env, capture_output=True, text=True)
-                self.assertEqual(result.returncode == 0, stage == 'success', result.stderr)
+                self.assertEqual(result.returncode == 0, stage in ('success','logclear'), result.stderr)
                 for artifact in ('logcat.txt', 'services.txt', 'media-session.txt', 'final-screen.png'):
                     self.assertTrue((logdir / artifact).exists(), (stage, artifact))
                 if stage == 'instrument': self.assertIn('adb instrumentation command failed', result.stderr)
