@@ -1,6 +1,7 @@
 name: Android APK
 on:
   push:
+    branches: [main]
     paths:
       - 'android/**'
       - 'web/**'

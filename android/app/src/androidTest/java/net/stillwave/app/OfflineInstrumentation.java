@@ -57,16 +57,13 @@ public final class OfflineInstrumentation extends Instrumentation {
         AtomicReference<WebView> view = new AtomicReference<>();
         runOnMainSync(() -> view.set((WebView) ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0)));
         WebView web = view.get();
-        long deadline = SystemClock.elapsedRealtime() + 15000;
-        while (!"\"complete\"".equals(evaluate(web, "document.readyState")) && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100);
-        require("\"complete\"".equals(evaluate(web, "document.readyState")), "Bundled document loaded offline");
-        require("true".equals(evaluate(web, "location.origin==='https://appassets.androidplatform.net' && typeof NativeAudio==='object' && document.querySelectorAll('button').length>0")), "Offline UI and bridge present");
-        // Assert the actual initialized UI, not a dynamic-import probe that itself
-        // requires a newer WebView than the supported legacy classic entry point.
-        String initialized = "window.__stillwaveReady===true && !document.getElementById('playButton').disabled && document.getElementById('offlineStatus').textContent.indexOf('Bundled')>=0";
-        deadline = SystemClock.elapsedRealtime() + 10000;
+        long deadline = SystemClock.elapsedRealtime() + 30000;
+        // about:blank can initially report complete before loadUrl commits. Wait
+        // for the actual bundled URL and initialized player, not that first state.
+        String initialized = "location.href==='" + MainActivity.HOME + "' && document.readyState==='complete' && window.__stillwaveReady===true && !document.getElementById('playButton').disabled && document.getElementById('offlineStatus').textContent.indexOf('Bundled')>=0";
         while (!"true".equals(evaluate(web, initialized)) && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100);
-        require("true".equals(evaluate(web, initialized)), "Bundled JavaScript initialized the live UI offline");
+        require("true".equals(evaluate(web, initialized)), "Bundled JavaScript initialized the live UI offline: " + evaluate(web, "location.href"));
+        require("true".equals(evaluate(web, "location.origin==='https://appassets.androidplatform.net' && typeof NativeAudio==='object' && document.querySelectorAll('button').length>0")), "Offline UI and bridge present");
         require("true".equals(evaluate(web, "Array.prototype.every.call(document.querySelectorAll('script[src]'),function(script){return script.src.indexOf(location.origin+'/assets/web/')===0;})")), "Every script is bundled on the trusted origin");
         // Exercise the real DOM event handlers through the bridge into the service.
         evaluate(web, "document.getElementById('duration').value='0'; document.getElementById('duration').dispatchEvent(new Event('change')); document.getElementById('volume').value='0.25'; document.getElementById('volume').dispatchEvent(new Event('input')); document.getElementById('playButton').click(); true");

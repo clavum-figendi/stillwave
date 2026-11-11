@@ -143,11 +143,9 @@ public final class MainActivity extends Activity {
             if (!allowed() || json == null || json.length() > 8192) return;
             main.post(() -> {
                 if (!allowed() || !visible) return; // FGS starts only from visible, trusted UI or media notification.
-                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                        && !getPreferences(MODE_PRIVATE).getBoolean("notificationAsked", false)) {
-                    getPreferences(MODE_PRIVATE).edit().putBoolean("notificationAsked", true).apply();
-                    requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 7);
-                }
+                // MediaSession playback notifications are exempt from Android 13's
+                // notification permission. Do not cover the player with a permission
+                // Activity or suspend its WebView while starting offline playback.
                 try {
                     startForegroundService(new Intent(MainActivity.this, PlaybackService.class).setAction(PlaybackService.START).putExtra("settings", json));
                 } catch (RuntimeException error) { PlaybackService.reportError("Playback could not start. Open the app and try again."); }

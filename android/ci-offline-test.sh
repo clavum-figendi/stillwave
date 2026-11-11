@@ -4,6 +4,15 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 APK_DIR=${1:-"$ROOT/android/app/build/outputs/apk"}
 LOG_DIR=${STILLWAVE_TEST_LOG_DIR:-"$ROOT/android/build/offline-test"}
 mkdir -p "$LOG_DIR"
+# Always retain diagnostics, including failures before instrumentation starts.
+collect_diagnostics() {
+  adb logcat -d > "$LOG_DIR/logcat.txt" 2>&1 || true
+  adb shell dumpsys activity services net.stillwave.app > "$LOG_DIR/services.txt" 2>&1 || true
+  adb shell dumpsys media_session > "$LOG_DIR/media-session.txt" 2>&1 || true
+  adb exec-out screencap -p > "$LOG_DIR/final-screen.png" 2>/dev/null || true
+}
+trap collect_diagnostics EXIT
+set -x
 adb install -r "$APK_DIR/debug/app-debug.apk"
 adb install -r "$APK_DIR/androidTest/debug/app-debug-androidTest.apk"
 adb shell pm clear net.stillwave.app
