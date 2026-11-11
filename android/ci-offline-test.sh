@@ -13,8 +13,8 @@ collect_diagnostics() {
 }
 trap collect_diagnostics EXIT
 set -x
-adb install -r "$APK_DIR/debug/app-debug.apk"
-adb install -r "$APK_DIR/androidTest/debug/app-debug-androidTest.apk"
+timeout 120s adb install --no-streaming -r "$APK_DIR/debug/app-debug.apk"
+timeout 120s adb install --no-streaming -r "$APK_DIR/androidTest/debug/app-debug-androidTest.apk"
 adb shell pm clear net.stillwave.app
 API=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
 if [ "$API" -ge 33 ]; then
@@ -23,24 +23,25 @@ if [ "$API" -ge 33 ]; then
   adb shell pm revoke net.stillwave.app android.permission.POST_NOTIFICATIONS
   adb shell pm set-permission-flags net.stillwave.app android.permission.POST_NOTIFICATIONS user-set user-fixed
 fi
-adb shell settings put global airplane_mode_on 1
-adb shell svc wifi disable
-adb shell svc data disable
+bash "$ROOT/android/prepare-offline-device.sh" "$API"
 adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard
 adb logcat -c
 set +e
-adb shell am instrument -w -r net.stillwave.app.test/net.stillwave.app.OfflineInstrumentation | tee "$LOG_DIR/instrumentation.txt"
-INSTRUMENT_EXIT=${PIPESTATUS[0]}
+timeout 240s adb shell am instrument -w -r net.stillwave.app.test/net.stillwave.app.OfflineInstrumentation | tee "$LOG_DIR/instrumentation.txt"
+INSTRUMENT_STATUS=("${PIPESTATUS[@]}")
+INSTRUMENT_EXIT=${INSTRUMENT_STATUS[0]}
+TEE_EXIT=${INSTRUMENT_STATUS[1]}
 set -e
 adb logcat -d > "$LOG_DIR/logcat.txt"
 adb shell dumpsys activity services net.stillwave.app > "$LOG_DIR/services.txt"
 adb shell dumpsys media_session > "$LOG_DIR/media-session.txt"
 adb exec-out screencap -p > "$LOG_DIR/final-screen.png"
-python3 - "$LOG_DIR/instrumentation.txt" "$INSTRUMENT_EXIT" <<'PY'
+python3 - "$LOG_DIR/instrumentation.txt" "$INSTRUMENT_EXIT" "$TEE_EXIT" <<'PY'
 import pathlib, sys
 output = pathlib.Path(sys.argv[1]).read_text()
 assert sys.argv[2] == '0', 'adb instrumentation command failed'
+assert sys.argv[3] == '0', 'Could not retain instrumentation output'
 assert 'INSTRUMENTATION_CODE: -1' in output, 'Instrumentation did not finish successfully'
 assert '1 offline integration test passed' in output, 'Missing explicit test completion'
 assert 'INSTRUMENTATION_STATUS_CODE: -2' not in output, 'Integration assertion failed'

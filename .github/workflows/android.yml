@@ -26,6 +26,7 @@ jobs:
           npm ci --prefix tests
           npm --prefix tests run check:build
           node --test tests/*.test.mjs
+          python3 -m unittest discover -s android/harness-tests -v
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

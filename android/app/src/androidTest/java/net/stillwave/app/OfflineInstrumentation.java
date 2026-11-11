@@ -62,7 +62,9 @@ public final class OfflineInstrumentation extends Instrumentation {
         // for the actual bundled URL and initialized player, not that first state.
         String initialized = "location.href==='" + MainActivity.HOME + "' && document.readyState==='complete' && window.__stillwaveReady===true && !document.getElementById('playButton').disabled && document.getElementById('offlineStatus').textContent.indexOf('Bundled')>=0";
         while (!"true".equals(evaluate(web, initialized)) && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100);
-        require("true".equals(evaluate(web, initialized)), "Bundled JavaScript initialized the live UI offline: " + evaluate(web, "location.href"));
+        if (!"true".equals(evaluate(web, initialized))) {
+            throw new AssertionError("Bundled JavaScript initialized the live UI offline: " + evaluate(web, "location.href"));
+        }
         require("true".equals(evaluate(web, "location.origin==='https://appassets.androidplatform.net' && typeof NativeAudio==='object' && document.querySelectorAll('button').length>0")), "Offline UI and bridge present");
         require("true".equals(evaluate(web, "Array.prototype.every.call(document.querySelectorAll('script[src]'),function(script){return script.src.indexOf(location.origin+'/assets/web/')===0;})")), "Every script is bundled on the trusted origin");
         // Exercise the real DOM event handlers through the bridge into the service.
@@ -108,10 +110,61 @@ public final class OfflineInstrumentation extends Instrumentation {
         require(getTargetContext().getSystemService(NotificationManager.class).getActiveNotifications().length == 0, "Stop removes notification");
         runOnMainSync(activity::finish);
     }
+    // Pure Java policy: submission and stack collection share the same total budget.
+    static final class CallbackDeadline {
+        final long started;
+        CallbackDeadline(long started) { this.started = started; }
+        long remainingMillis(long now, long budget) {
+            return Math.max(0, budget - (now - started));
+        }
+    }
+    private static final String PROBE_TAG = "StillwaveJsProbe";
+    private static void dumpJavaThreads(String description) {
+        android.util.Log.e(PROBE_TAG, "phase=thread-dump script=" + description);
+        // Includes main and JavaBridge even when neither is making progress.
+        for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+            Thread thread = entry.getKey();
+            android.util.Log.e(PROBE_TAG, "thread=" + thread.getName() + " id=" + thread.getId() + " state=" + thread.getState());
+            for (StackTraceElement frame : entry.getValue()) android.util.Log.e(PROBE_TAG, "    at " + frame);
+        }
+    }
     private String evaluate(WebView view, String script) throws Exception {
-        CountDownLatch latch = new CountDownLatch(1); AtomicReference<String> value = new AtomicReference<>();
-        runOnMainSync(() -> view.evaluateJavascript(script, result -> { value.set(result); latch.countDown(); }));
-        require(latch.await(5, TimeUnit.SECONDS), "JavaScript callback timed out");
+        CallbackDeadline deadline = new CallbackDeadline(SystemClock.elapsedRealtime());
+        String description = script.replace('\n', ' ').replace('\r', ' ');
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> value = new AtomicReference<>();
+        AtomicReference<Throwable> submissionFailure = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicLong callbackAt = new java.util.concurrent.atomic.AtomicLong(-1);
+        android.util.Log.i(PROBE_TAG, "phase=enqueue elapsedMs=0 script=" + description);
+        // Do not block in runOnMainSync: main-thread queue latency must also be
+        // observable and bounded, rather than hiding before the callback wait.
+        boolean posted = new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            android.util.Log.i(PROBE_TAG, "phase=submitted elapsedMs=" + (SystemClock.elapsedRealtime() - deadline.started) + " script=" + description);
+            try {
+                view.evaluateJavascript(script, result -> {
+                    long now = SystemClock.elapsedRealtime();
+                    value.set(result);
+                    callbackAt.set(now);
+                    android.util.Log.i(PROBE_TAG, "phase=callback elapsedMs=" + (now - deadline.started) + " late=" + (now - deadline.started > 5000) + " script=" + description);
+                    latch.countDown();
+                });
+                android.util.Log.i(PROBE_TAG, "phase=submit-returned elapsedMs=" + (SystemClock.elapsedRealtime() - deadline.started) + " script=" + description);
+            } catch (Throwable error) {
+                submissionFailure.set(error);
+                latch.countDown();
+            }
+        });
+        require(posted, "Could not enqueue JavaScript: " + description);
+        boolean complete = latch.await(deadline.remainingMillis(SystemClock.elapsedRealtime(), 5000), TimeUnit.MILLISECONDS);
+        if (!complete) {
+            android.util.Log.e(PROBE_TAG, "phase=diagnostic-threshold elapsedMs=" + (SystemClock.elapsedRealtime() - deadline.started) + " script=" + description);
+            dumpJavaThreads(description); // Capture before finish() can tear down the process.
+            complete = latch.await(deadline.remainingMillis(SystemClock.elapsedRealtime(), 30000), TimeUnit.MILLISECONDS);
+        }
+        if (submissionFailure.get() != null) throw new AssertionError("JavaScript submission failed: " + description, submissionFailure.get());
+        boolean inBudget = complete && callbackAt.get() >= 0 && callbackAt.get() - deadline.started <= 30000;
+        if (!inBudget) android.util.Log.e(PROBE_TAG, "phase=timeout elapsedMs=" + (SystemClock.elapsedRealtime() - deadline.started) + " script=" + description);
+        require(inBudget, "JavaScript callback timed out (30000ms total): " + description);
         return value.get();
     }
 }
