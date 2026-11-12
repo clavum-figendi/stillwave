@@ -7,13 +7,15 @@ streaming, analytics, external fonts or paid generation APIs.
 ## Get Stillwave
 
 - **Web app:** https://clavum-figendi.github.io/stillwave/
-- **Android 1.0.1:** signed APK in the [release](https://github.com/clavum-figendi/stillwave/releases/tag/v1.0.1).
-- **Runtime evidence:** [Android 8, 10 and 15 emulator run](https://github.com/clavum-figendi/stillwave/actions/runs/43114537411),
+- **Android 1.1.0:** signed APK in the [release](https://github.com/clavum-figendi/stillwave/releases/tag/v1.1.0).
+- **Runtime evidence:** [Android 8, 10 and 15 emulator run](https://github.com/clavum-figendi/stillwave/actions/runs/43152424725),
   including cold offline start, UI controls, notification transport and screen-off
   native playback. Physical-device/OEM battery behavior is not yet measured.
 
 The Android update uses the same package and signing identity as the 1.0.0 test
-build. Install it over the test build to retain local app data.
+build and 1.0.1 release. Install it over either to retain local app data.
+The emulator matrix tests debug APKs of the same production source; the signed
+release is independently verified for signature, permissions and bundled assets.
 
 ## Sound and interface
 

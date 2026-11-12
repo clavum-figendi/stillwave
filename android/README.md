@@ -153,7 +153,8 @@ validation, and monotonic pause/resume/reset.
 Observed local JVM output:
 
 ```text
-Audio metrics: RMS=0.06176 peak=0.19815 maxStep=0.00913 liveMaxStep=0.03457
+PASS 124 expansion scenarios
+Audio metrics: RMS=0.04396 peak=0.13504 maxStep=0.00446 liveMaxStep=0.08523
 PASS 176442 core assertions
 ```
 
@@ -166,15 +167,16 @@ JavaScript-enabled warning is expected for the strictly bundled-only WebView.
 
 **Verified locally:** signed release assembly and v2 APK signature verification,
 release lint, debug/test APK compilation, pure Java tests, and exact parity of all
-13 bundled web files. The UI now ships a classic Chromium61/ES2017-compatible
+14 bundled web files. The UI ships a classic Chromium61/ES2017-compatible
 bundle; Android tests poll its actual initialized controls and start playback by
 clicking the real player button. Source freshness and legacy-runtime regressions
 are also checked before CI packaging.
 
-**Runtime verification passed:** [CI run 43114537411](https://github.com/clavum-figendi/stillwave/actions/runs/43114537411)
+**1.1.0 runtime verification passed:** [CI run 43152424725](https://github.com/clavum-figendi/stillwave/actions/runs/43152424725)
 passed on API26, API29 and API35 (Android 8, 10 and 15). Each job cold-launched
 after clearing app data with airplane mode enabled, Wi-Fi disabled and no active
-default network. The tests exercised the actual player button, native AudioTrack
+default network. The tests exercised expanded real DOM controls reaching validated native
+settings, the actual player button, native AudioTrack
 frames, pause/resume/stop, notification controls, screen-off playback, wake-lock
 release and notification cleanup. Android 13+ notifications were denied.
 
