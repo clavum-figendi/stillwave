@@ -25,7 +25,7 @@ test('settings have safe defaults and sanitize untrusted persisted input', async
   assert.equal(defaults.duration, 25);
   assert.equal(defaults.rateHz, 16);
   assert.ok(defaults.seed > 0 && Number.isInteger(defaults.seed));
-  const bad = normalizeSettings({mode:'bogus',style:'bogus',volume:99,intensity:-8,rateHz:Infinity,ambience:'ocean',ambienceVolume:-1,duration:2,seed:-1});
+  const bad = normalizeSettings({mode:'bogus',style:'bogus',volume:99,intensity:-8,rateHz:Infinity,ambience:'remote-url',ambienceVolume:-1,duration:2,seed:-1});
   assert.equal(bad.mode,'focus'); assert.equal(bad.style,'ambient');
   assert.equal(bad.volume,1); assert.equal(bad.intensity,0); assert.equal(bad.rateHz,16);
   assert.equal(bad.ambience,'none'); assert.equal(bad.ambienceVolume,0); assert.equal(bad.duration,25);

@@ -11,6 +11,7 @@ public final class CoreTests {
         if (!condition) throw new AssertionError(message);
     }
     public static void main(String[] args) {
+        ExpansionTests.main(args);
         Settings defaults = Settings.from(Map.of());
         check(defaults.mode.equals("focus"), "default focus");
         check(defaults.rate == 16, "default rate 16 Hz");
@@ -102,6 +103,7 @@ public final class CoreTests {
             check(Float.isFinite(repeated[i]) && Math.abs(repeated[i]) < .81, "live controls finite and peak bounded");
             if (i >= 2) updateStep = Math.max(updateStep, Math.abs(repeated[i] - repeated[i - 2]));
         }
+        System.out.println("Native live update max step: "+updateStep);
         check(updateStep < .15, "live mode/style/gain changes remain smooth");
         boolean rejected = false;
         try { synth.render(new float[3], 2); } catch (IllegalArgumentException expected) { rejected = true; }

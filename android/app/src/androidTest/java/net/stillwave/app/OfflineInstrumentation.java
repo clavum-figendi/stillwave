@@ -67,7 +67,11 @@ public final class OfflineInstrumentation extends Instrumentation {
         }
         require("true".equals(evaluate(web, "location.origin==='https://appassets.androidplatform.net' && typeof NativeAudio==='object' && document.querySelectorAll('button').length>0")), "Offline UI and bridge present");
         require("true".equals(evaluate(web, "Array.prototype.every.call(document.querySelectorAll('script[src]'),function(script){return script.src.indexOf(location.origin+'/assets/web/')===0;})")), "Every script is bundled on the trusted origin");
-        // Exercise the real DOM event handlers through the bridge into the service.
+        // Exercise expanded settings through the real DOM event handlers before
+        // the first offline playback. Reflection below observes validated service
+        // controls, not a JavaScript bridge stub or saved UI-only preferences.
+        String expansionSetup = "(function(){var keys={synth:'fm',ambience:'ocean',brightness:.18,space:.7,stereo:0,density:.8,musicVolume:.65,bassVolume:.2,melodyVolume:.4};var style=document.querySelector('[data-style=glass]');if(!style)return false;style.click();for(var key in keys){var el=document.getElementById(key);if(!el)return false;el.value=String(keys[key]);el.dispatchEvent(new Event(el.type==='range'?'input':'change'));}return true;})()";
+        require("true".equals(evaluate(web, expansionSetup)), "Expanded offline sound controls exist and handle input");
         evaluate(web, "document.getElementById('duration').value='0'; document.getElementById('duration').dispatchEvent(new Event('change')); document.getElementById('volume').value='0.25'; document.getElementById('volume').dispatchEvent(new Event('input')); document.getElementById('playButton').click(); true");
         deadline = SystemClock.elapsedRealtime() + 8000;
         while (!new JSONObject(PlaybackService.stateJson()).optBoolean("playing") && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100);
@@ -75,6 +79,14 @@ public final class OfflineInstrumentation extends Instrumentation {
         JSONObject playing = new JSONObject(PlaybackService.stateJson());
         require(playing.getBoolean("playing") && !playing.has("error"), "Native playback started: " + playing);
         require(playing.getDouble("elapsed") > .5 && playing.getLong("renderedFrames") > 0, "AudioTrack worker produced audio");
+        java.lang.reflect.Field controlsField = PlaybackService.class.getDeclaredField("controls");
+        controlsField.setAccessible(true);
+        java.util.Map<String, Object> expanded = ((net.stillwave.audio.Settings) controlsField.get(null)).toMap();
+        require("glass".equals(expanded.get("style")) && "fm".equals(expanded.get("synth")) && "ocean".equals(expanded.get("ambience")), "Style, synth and texture reached validated native controls: " + expanded);
+        String[] mixKeys = {"brightness", "space", "stereo", "density", "musicVolume", "bassVolume", "melodyVolume"};
+        double[] mixValues = {.18, .7, 0, .8, .65, .2, .4};
+        for (int i = 0; i < mixKeys.length; i++) require(expanded.get(mixKeys[i]) instanceof Number && Math.abs(((Number) expanded.get(mixKeys[i])).doubleValue() - mixValues[i]) < .0001, "Native expanded control preserved: " + mixKeys[i]);
+        android.util.Log.i("StillwaveExpansion", "Expanded controls verified offline: " + expanded);
         require(getTargetContext().getSystemService(NotificationManager.class).getActiveNotifications().length > 0, "Media notification exists");
         evaluate(web, "NativeAudio.pause(); true"); SystemClock.sleep(400);
         JSONObject paused = new JSONObject(PlaybackService.stateJson());

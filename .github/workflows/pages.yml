@@ -37,6 +37,8 @@ jobs:
           # mirror/DNS stalls and download only the Chromium headless shell.
           python -m playwright install chromium --only-shell
           python tests/browser_test.py
+          python tests/expansion_audio_test.py
+          python tests/expansion_ui_test.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

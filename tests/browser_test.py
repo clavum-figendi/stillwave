@@ -300,8 +300,16 @@ class BrowserTests(unittest.TestCase):
         self.assertTrue(self.page.get_by_role('dialog').is_visible())
         self.page.keyboard.press('Escape')
         self.assertFalse(self.page.get_by_role('dialog').is_visible())
+        self.page.get_by_role('button',name='Start session',exact=True).click()
+        self.page.get_by_role('button',name='Pause session',exact=True).wait_for()
+        self.page.wait_for_function("document.getElementById('signalCanvas').dataset.running === 'true'")
         self.page.emulate_media(reduced_motion='reduce')
-        self.assertEqual(self.page.locator('.orb-lines').evaluate('e=>getComputedStyle(e).animationName'),'none')
+        self.page.wait_for_function("document.getElementById('signalCanvas').dataset.running === 'false'")
+        held=self.page.locator('#signalCanvas').evaluate('e=>e.toDataURL()')
+        self.page.wait_for_timeout(250)
+        self.assertEqual(self.page.locator('#signalCanvas').evaluate('e=>e.toDataURL()'),held)
+        self.assertTrue(self.page.get_by_role('button',name='Pause session',exact=True).is_visible())
+        self.page.get_by_role('button',name='Stop session',exact=True).click()
 
     def test_focus_clock_is_grid_aligned(self):
         result=self.page.evaluate('''async()=>{

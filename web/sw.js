@@ -1,7 +1,7 @@
 // Bump the cache version whenever any bundled asset changes.
 const SCOPE_PREFIX=`stillwave-shell-${encodeURIComponent(new URL(self.registration.scope).pathname)}-`;
-const VERSION=`${SCOPE_PREFIX}v1.0.2`;
-const ASSETS=['./','./index.html','./app.bundle.js','./sw.js','./styles.css','./manifest.webmanifest','./js/app.js','./js/settings.js','./js/audio.js','./js/native.js','./js/offline.js','./assets/icon.svg','./assets/icon-192.png','./assets/icon-512.png'];
+const VERSION=`${SCOPE_PREFIX}v1.1.0`;
+const ASSETS=['./','./index.html','./app.bundle.js','./sw.js','./styles.css','./RESEARCH.md','./manifest.webmanifest','./js/app.js','./js/settings.js','./js/audio.js','./js/native.js','./js/offline.js','./assets/icon.svg','./assets/icon-192.png','./assets/icon-512.png'];
 const urls=ASSETS.map(path=>new URL(path,self.registration.scope).href);
 async function check(){
   const cache=await caches.open(VERSION);

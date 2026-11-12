@@ -54,17 +54,30 @@
     const defaults = MODE_DEFAULTS[mode];
     return {
       mode,
-      style: choose(raw.style, ["ambient", "lofi", "deep"], defaults.style),
+      style: choose(raw.style, STYLES, defaults.style),
+      synth: choose(raw.synth, SYNTHS, "sine"),
+      brightness: bounded(raw.brightness, 0, 1, 0.5),
+      space: bounded(raw.space, 0, 1, 0.25),
+      stereo: bounded(raw.stereo, 0, 1, 0.65),
+      density: bounded(raw.density, 0, 1, 0.5),
+      musicVolume: bounded(raw.musicVolume, 0, 1, 0.8),
+      bassVolume: bounded(raw.bassVolume, 0, 1, 0.5),
+      melodyVolume: bounded(raw.melodyVolume, 0, 1, 0.5),
+      theme: choose(raw.theme, ["paper", "graphite", "moss", "sand", "dusk", "night"], "paper"),
+      uiDensity: choose(raw.uiDensity, ["comfortable", "compact"], "comfortable"),
+      textScale: choose(raw.textScale, [1, 1.15, 1.3], 1),
+      motionEnabled: boolean(raw.motionEnabled, true),
+      visualizer: boolean(raw.visualizer, true),
       volume: bounded(raw.volume, 0, 1, 0.55),
       intensity: bounded(raw.intensity, 0, 0.6, defaults.intensity),
       rateHz: bounded(raw.rateHz, 0.25, 32, defaults.rateHz),
-      ambience: choose(raw.ambience, ["none", "rain", "brown"], "none"),
+      ambience: choose(raw.ambience, AMBIENCES, "none"),
       ambienceVolume: bounded(raw.ambienceVolume, 0, 1, 0.2),
       duration: choose(raw.duration, DURATIONS, 25),
       seed: Number.isSafeInteger(raw.seed) && raw.seed > 0 ? raw.seed : Math.floor(Math.random() * 2147483646) + 1
     };
   }
-  var MODE_DEFAULTS, DURATIONS, STORAGE_KEY, choose, bounded;
+  var MODE_DEFAULTS, DURATIONS, STORAGE_KEY, choose, STYLES, SYNTHS, AMBIENCES, bounded, boolean;
   var init_settings = __esm({
     "web/js/settings.js"() {
       MODE_DEFAULTS = Object.freeze({
@@ -76,7 +89,11 @@
       DURATIONS = Object.freeze([0, 15, 25, 45, 60, 90]);
       STORAGE_KEY = "stillwave.settings.v1";
       choose = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
-      bounded = (value, low, high, fallback) => Number.isFinite(Number(value)) && value !== null && value !== "" ? Math.max(low, Math.min(high, Number(value))) : fallback;
+      STYLES = Object.freeze(["ambient", "lofi", "deep", "glass", "drift", "tape"]);
+      SYNTHS = Object.freeze(["sine", "triangle", "fm", "organ"]);
+      AMBIENCES = Object.freeze(["none", "rain", "brown", "pink", "ocean", "wind", "fire"]);
+      bounded = (value, low, high, fallback) => (typeof value === "number" || typeof value === "string" && value.trim() !== "") && Number.isFinite(Number(value)) ? Math.max(low, Math.min(high, Number(value))) : fallback;
+      boolean = (value, fallback) => typeof value === "boolean" ? value : fallback;
     }
   });
 
@@ -105,14 +122,27 @@
       graph.dispose();
     }
   }
-  var midi, tune, SoundGraph, StillwaveEngine;
+  var midi, character, tune, SoundGraph, StillwaveEngine;
   var init_audio = __esm({
     "web/js/audio.js"() {
       init_settings();
       midi = (note) => 440 * 2 ** ((note - 69) / 12);
+      character = {
+        ambient: { tone: 650, chord: 12, length: 15, attack: 2.8, step: 1, detune: 5 },
+        lofi: { tone: 380, chord: 12, length: 10, attack: 1.2, step: 0.5, detune: 9 },
+        deep: { tone: 260, chord: 12, length: 16, attack: 3.5, step: 2, detune: 3 },
+        glass: { tone: 1600, chord: 12, length: 8, attack: 0.35, step: 1.5, detune: 2 },
+        drift: { tone: 800, chord: 18, length: 21, attack: 4, step: 2, detune: 12 },
+        tape: { tone: 470, chord: 12, length: 13, attack: 1.8, step: 0.75, detune: 8 }
+      };
       tune = (param, value, now, fade = 0.12) => {
-        param.cancelScheduledValues(now);
-        param.setTargetAtTime(value, now, fade);
+        if (typeof param.cancelAndHoldAtTime === "function") param.cancelAndHoldAtTime(now);
+        else {
+          const held = param.value;
+          param.cancelScheduledValues(now);
+          param.setValueAtTime(held, now);
+        }
+        param.linearRampToValueAtTime(value, now + fade * 3);
       };
       SoundGraph = class {
         constructor(context, settings, origin = context.currentTime) {
@@ -122,12 +152,15 @@
           this.random = randomSource(this.settings.seed);
           this.nodes = /* @__PURE__ */ new Set();
           this.sources = /* @__PURE__ */ new Set();
+          this.voices = /* @__PURE__ */ new Set();
+          this.organWave = context.createPeriodicWave(new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 0]), new Float32Array([0, 1, 0.45, 0.2, 0.1, 0, 0, 0, 0.04]));
           this.nextChord = origin;
           this.nextNote = origin + 0.5;
           this.chordIndex = 0;
           this.master = this.node(context.createGain());
           this.master.gain.setValueAtTime(0, origin);
-          this.master.gain.linearRampToValueAtTime(this.settings.volume * 0.7, origin + 1.2);
+          this.master.gain.linearRampToValueAtTime(this.outputLevel(), origin + 1.2);
+          this.masterAutomation = { time: origin, start: 0, value: this.outputLevel(), end: origin + 1.2 };
           this.limiter = this.node(context.createDynamicsCompressor());
           this.limiter.threshold.value = -9;
           this.limiter.knee.value = 6;
@@ -135,14 +168,37 @@
           this.limiter.attack.value = 8e-3;
           this.limiter.release.value = 0.25;
           this.master.connect(this.limiter);
-          this.limiter.connect(context.destination);
+          const split = this.node(context.createChannelSplitter(2)), merge = this.node(context.createChannelMerger(2));
+          this.widthGains = [];
+          this.limiter.connect(split);
+          for (let input = 0; input < 2; input++) for (let output = 0; output < 2; output++) {
+            const gain = this.node(context.createGain());
+            gain.gain.value = (1 + (input === output ? 1 : -1) * this.settings.stereo) / 2;
+            split.connect(gain, input);
+            gain.connect(merge, 0, output);
+            this.widthGains.push({ gain: gain.gain, sign: input === output ? 1 : -1 });
+          }
+          this.analyser = this.node(context.createAnalyser());
+          this.analyser.fftSize = 256;
+          this.visualization = new Uint8Array(this.analyser.fftSize);
+          merge.connect(this.analyser);
+          this.analyser.connect(context.destination);
+          this.music = this.node(context.createGain());
+          this.music.gain.value = this.settings.musicVolume;
+          this.bass = this.node(context.createGain());
+          this.bass.gain.value = this.settings.bassVolume;
+          this.melody = this.node(context.createGain());
+          this.melody.gain.value = this.settings.melodyVolume;
           this.modBus = this.node(context.createGain());
           this.modBus.gain.value = 1 - this.settings.intensity / 2;
           this.toneFilter = this.node(context.createBiquadFilter());
           this.toneFilter.type = "lowpass";
-          this.toneFilter.frequency.value = this.settings.style === "deep" ? 900 : 1500;
+          this.toneFilter.frequency.value = this.cutoff();
           this.modBus.connect(this.toneFilter);
           this.toneFilter.connect(this.master);
+          this.music.connect(this.modBus);
+          this.melody.connect(this.modBus);
+          this.bass.connect(this.master);
           this.lfo = this.source(context.createOscillator());
           this.lfo.frequency.value = this.settings.rateHz;
           this.lfoDepth = this.node(context.createGain());
@@ -158,15 +214,43 @@
           }
           this.reverb.buffer = impulse;
           this.wet = this.node(context.createGain());
-          this.wet.gain.value = 0.12;
+          this.wet.gain.value = this.settings.space * 0.48;
           this.toneFilter.connect(this.reverb);
           this.reverb.connect(this.wet);
           this.wet.connect(this.master);
+          this.bass.connect(this.reverb);
+          this.wow = this.source(context.createOscillator());
+          this.wow.frequency.value = 0.19;
+          this.wowDepth = this.node(context.createGain());
+          this.wowDepth.gain.value = this.settings.style === "tape" ? 8 : this.settings.style === "drift" ? 3 : 0;
+          this.wow.connect(this.wowDepth);
+          this.wow.start(origin);
           this.createAmbience(origin);
         }
         node(node) {
           this.nodes.add(node);
           return node;
+        }
+        outputLevel() {
+          const s = this.settings;
+          return s.musicVolume === 0 && s.bassVolume === 0 && s.melodyVolume === 0 && (s.ambience === "none" || s.ambienceVolume === 0) ? 0 : s.volume * 0.7;
+        }
+        masterValue(at) {
+          const a = this.masterAutomation, dt = Math.max(0, at - a.time);
+          return a.constant ? a.value + (a.start - a.value) * Math.exp(-dt / a.constant) : a.start + (a.value - a.start) * Math.min(1, dt / Math.max(1e-5, a.end - a.time));
+        }
+        holdMaster(at) {
+          const value = this.masterValue(at), p = this.master.gain, a = this.masterAutomation;
+          if (typeof p.cancelAndHoldAtTime === "function") p.cancelAndHoldAtTime(at);
+          else {
+            p.cancelScheduledValues(at);
+            if (!a.constant && at <= a.end) p.linearRampToValueAtTime(value, at);
+            else p.setValueAtTime(value, at);
+          }
+          return value;
+        }
+        cutoff() {
+          return character[this.settings.style].tone * 2 ** (this.settings.brightness * 3);
         }
         source(node) {
           this.node(node);
@@ -179,75 +263,106 @@
           return node;
         }
         createAmbience(origin) {
-          const c = this.context, buffer = c.createBuffer(1, c.sampleRate * 11, c.sampleRate);
-          const data = buffer.getChannelData(0);
-          let last = 0;
-          for (let i = 0; i < data.length; i++) {
-            const white = this.random() * 2 - 1;
-            last = (last + 0.035 * white) / 1.035;
-            data[i] = last * 4.5;
+          const c = this.context, random = randomSource(this.settings.seed ^ 5370206);
+          this.textures = [];
+          for (const kind of AMBIENCES.slice(1)) {
+            const buffer = c.createBuffer(1, c.sampleRate * 8, c.sampleRate), data = buffer.getChannelData(0);
+            let brown = 0, slow = 0, mid = 0, fast = 0, crackle = 0;
+            for (let i = 0; i < data.length; i++) {
+              const white = random() * 2 - 1, t = i / c.sampleRate;
+              brown = 0.997 * brown + 0.035 * white;
+              slow = 0.98 * slow + 0.02 * white;
+              mid = 0.85 * mid + 0.15 * white;
+              fast = 0.5 * fast + 0.5 * white;
+              const pink = slow * 2.5 + mid * 0.8 + fast * 0.3 + white * 0.08;
+              crackle *= 0.985;
+              if (random() < 7e-4) crackle = 0.3 + random() * 0.7;
+              let value = kind === "rain" ? white * 0.45 + fast * 0.2 : kind === "brown" ? brown * 2.5 : kind === "pink" ? pink : kind === "ocean" ? pink * (0.25 + 0.75 * Math.sin(t * Math.PI / 8) ** 2) : kind === "wind" ? (mid - slow) * 1.8 * (0.4 + 0.6 * Math.sin(t * Math.PI / 4) ** 2) : brown * 0.4 + white * crackle;
+              const seam = Math.min(1, i / (c.sampleRate * 0.03), (data.length - 1 - i) / (c.sampleRate * 0.03));
+              data[i] = Math.tanh(value) * seam;
+            }
+            const source = this.source(c.createBufferSource()), gain = this.node(c.createGain());
+            source.buffer = buffer;
+            source.loop = true;
+            gain.gain.value = this.settings.ambience === kind ? this.settings.ambienceVolume * 0.24 : 0;
+            source.connect(gain);
+            gain.connect(this.master);
+            source.start(origin);
+            this.textures.push({ kind, gain: gain.gain });
           }
-          this.noise = this.source(c.createBufferSource());
-          this.noise.buffer = buffer;
-          this.noise.loop = true;
-          this.noiseFilter = this.node(c.createBiquadFilter());
-          this.noiseFilter.type = "lowpass";
-          this.noiseFilter.frequency.value = this.settings.ambience === "rain" ? 2800 : 500;
-          this.noiseGain = this.node(c.createGain());
-          this.noiseGain.gain.value = this.settings.ambience === "none" ? 0 : this.settings.ambienceVolume * 0.24;
-          this.noise.connect(this.noiseFilter);
-          this.noiseFilter.connect(this.noiseGain);
-          this.noiseGain.connect(this.master);
-          this.breeze = this.source(c.createOscillator());
-          this.breeze.frequency.value = 0.037;
-          this.breezeGain = this.node(c.createGain());
-          this.breezeGain.gain.value = 100;
-          this.breeze.connect(this.breezeGain);
-          this.breezeGain.connect(this.noiseFilter.frequency);
-          this.noise.start(origin);
-          this.breeze.start(origin);
         }
-        voice(frequency, start, length, gain, type = "sine", bass = false, pan = 0) {
-          const c = this.context, oscillator = this.source(c.createOscillator()), envelope = this.node(c.createGain());
-          const panner = this.node(c.createStereoPanner());
+        voice(frequency, start, length, gain, type = "sine", bass = false, pan = 0, melody = false) {
+          const c = this.context, envelope = this.node(c.createGain()), panner = this.node(c.createStereoPanner());
+          const local = [envelope, panner], oscillators = [], mixes = [];
           panner.pan.value = pan;
-          oscillator.type = type;
-          oscillator.frequency.value = frequency;
-          oscillator.detune.value = bass ? 0 : (this.random() - 0.5) * 5;
-          const attack = Math.min(length * 0.25, bass ? 0.8 : 2.8), end = start + length;
+          const detune = bass ? 0 : (this.random() - 0.5) * character[this.settings.style].detune;
+          for (const kind of bass ? ["sine"] : SYNTHS) {
+            const oscillator = this.source(c.createOscillator()), mix = this.node(c.createGain());
+            oscillator.frequency.value = frequency;
+            oscillator.detune.value = detune;
+            if (kind === "organ") oscillator.setPeriodicWave(this.organWave);
+            else oscillator.type = kind === "triangle" ? "triangle" : "sine";
+            if (!bass) this.wowDepth.connect(oscillator.detune);
+            mix.gain.value = bass || this.settings.synth === kind ? 1 : 0;
+            oscillator.connect(mix);
+            mix.connect(envelope);
+            local.push(oscillator, mix);
+            oscillators.push(oscillator);
+            mixes.push({ kind, gain: mix.gain });
+            if (kind === "fm") {
+              const mod = this.source(c.createOscillator()), depth = this.node(c.createGain());
+              mod.frequency.value = frequency * 2;
+              depth.gain.value = frequency * 0.65;
+              mod.connect(depth);
+              depth.connect(oscillator.frequency);
+              local.push(mod, depth);
+              oscillators.push(mod);
+            }
+          }
+          const attack = Math.min(length * 0.25, bass ? 0.8 : melody ? 0.08 : character[this.settings.style].attack), end = start + length;
           envelope.gain.setValueAtTime(0, start);
           envelope.gain.linearRampToValueAtTime(gain, start + attack);
           envelope.gain.setValueAtTime(gain * 0.8, start + length * 0.55);
           envelope.gain.linearRampToValueAtTime(0, end);
-          oscillator.connect(envelope);
           envelope.connect(panner);
-          panner.connect(bass ? this.master : this.modBus);
-          oscillator.onended = () => {
-            for (const n of [oscillator, envelope, panner]) {
+          panner.connect(bass ? this.bass : melody ? this.melody : this.music);
+          const record = { mixes, bass };
+          this.voices.add(record);
+          oscillators[0].onended = () => {
+            for (const oscillator of oscillators) if (!bass) {
+              try {
+                this.wowDepth.disconnect(oscillator.detune);
+              } catch (e) {
+              }
+            }
+            for (const n of local) {
               n.disconnect();
               this.nodes.delete(n);
               this.sources.delete(n);
             }
+            this.voices.delete(record);
           };
-          oscillator.start(start);
-          oscillator.stop(end + 0.02);
+          for (const oscillator of oscillators) {
+            oscillator.start(start);
+            oscillator.stop(end + 0.02);
+          }
         }
         schedule(until) {
-          const s = this.settings;
+          const s = this.settings, preset = character[s.style];
           while (this.nextChord < until) {
             const time = this.nextChord, roots = [57, 53, 60, 55, 58, 53, 62, 55];
             const root = roots[(this.chordIndex + Math.floor(this.chordIndex / 8)) % roots.length];
             const inversion = this.random() > 0.55 ? 12 : 0;
             [0, 7, 12, 15].forEach((interval, i) => {
-              const note = Math.max(57, root + interval + (i === 0 ? inversion : 0));
-              this.voice(midi(Math.min(83, note)), time + i * (s.mode === "focus" ? 0.0625 : 0.09), 14 + this.random() * 2, 0.065, "sine", false, (i - 1.5) * 0.22);
+              const note = Math.max(57, root + interval + (i === 0 ? inversion : 0) + (s.style === "glass" ? 12 : s.style === "deep" ? -12 : 0));
+              this.voice(midi(Math.min(95, note)), time + i * (s.mode === "focus" ? 0.0625 : 0.09), preset.length + this.random(), 0.065, "sine", false, (i - 1.5) * 0.22);
             });
             this.voice(midi(root - 24), time, 13, 0.075, "sine", true);
             this.chordIndex++;
-            this.nextChord += s.mode === "focus" ? 12 : 12 + (this.random() - 0.5) * 0.5;
+            this.nextChord += s.mode === "focus" ? preset.chord : preset.chord + (this.random() - 0.5) * 0.5;
           }
           while (this.nextNote < until) {
-            const sleep = s.mode === "sleep", step = sleep ? 2 : s.style === "lofi" ? 0.5 : 1;
+            const sleep = s.mode === "sleep", step = (sleep ? 2 : preset.step) * 2 ** (1 - 2 * s.density);
             if (this.random() > (sleep ? 0.7 : 0.33)) {
               const degrees = [0, 3, 5, 7, 10, 12, 15], note = 57 + degrees[Math.floor(this.random() * degrees.length)];
               this.voice(
@@ -257,7 +372,8 @@
                 s.style === "deep" ? 0.012 : 0.032,
                 s.style === "lofi" ? "triangle" : "sine",
                 false,
-                (this.random() - 0.5) * 0.85
+                (this.random() - 0.5) * 0.85,
+                true
               );
             }
             this.nextNote += step;
@@ -266,17 +382,26 @@
         update(settings) {
           this.settings = normalizeSettings(settings);
           const s = this.settings, t = this.context.currentTime;
-          tune(this.master.gain, s.volume * 0.7, t);
+          const held = this.holdMaster(t);
+          this.master.gain.linearRampToValueAtTime(this.outputLevel(), t + 0.36);
+          this.masterAutomation = { time: t, start: held, value: this.outputLevel(), end: t + 0.36 };
           tune(this.modBus.gain, 1 - s.intensity / 2, t);
           tune(this.lfoDepth.gain, s.intensity / 2, t);
           tune(this.lfo.frequency, s.rateHz, t);
-          tune(this.toneFilter.frequency, s.style === "deep" ? 900 : 1500, t, 0.5);
-          tune(this.noiseGain.gain, s.ambience === "none" ? 0 : s.ambienceVolume * 0.24, t, 0.3);
-          tune(this.noiseFilter.frequency, s.ambience === "rain" ? 2800 : 500, t, 0.5);
+          tune(this.toneFilter.frequency, this.cutoff(), t, 0.5);
+          tune(this.music.gain, s.musicVolume, t);
+          tune(this.bass.gain, s.bassVolume, t);
+          tune(this.melody.gain, s.melodyVolume, t);
+          tune(this.wet.gain, s.space * 0.48, t, 0.3);
+          for (const entry of this.widthGains) tune(entry.gain, (1 + entry.sign * s.stereo) / 2, t);
+          for (const texture of this.textures) tune(texture.gain, s.ambience === texture.kind ? s.ambienceVolume * 0.24 : 0, t, 0.3);
+          for (const voice of this.voices) if (!voice.bass) for (const mix of voice.mixes) tune(mix.gain, mix.kind === s.synth ? 1 : 0, t);
+          tune(this.wowDepth.gain, s.style === "tape" ? 8 : s.style === "drift" ? 3 : 0, t, 0.5);
         }
         fadeOut(at, seconds = 0.8) {
-          this.master.gain.cancelAndHoldAtTime(at);
+          const held = this.holdMaster(at);
           this.master.gain.linearRampToValueAtTime(0, at + seconds);
+          this.masterAutomation = { time: at, start: held, value: 0, end: at + seconds };
         }
         dispose() {
           for (const source of this.sources) {
@@ -397,6 +522,11 @@
           this.settings = normalizeSettings(__spreadValues(__spreadValues({}, this.settings), settings));
           (_a = this.graph) == null ? void 0 : _a.update(this.settings);
           this.tick();
+        }
+        getVisualizationData() {
+          if (!this.graph) return new Uint8Array(0);
+          this.graph.analyser.getByteTimeDomainData(this.graph.visualization);
+          return this.graph.visualization;
         }
         getState() {
           var _a;
@@ -530,20 +660,120 @@
       sleep: ["Somewhere softer", "A low, slow soundscape. Let the rest wait."],
       meditate: ["Here, for a while", "An open space to listen. One moment at a time."]
     };
+    const canvas = $("signalCanvas"), paint = canvas.getContext("2d");
+    const reducedMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+    let visualFrame = 0, lastVisualTime = 0;
+    const measured = !native && typeof engine.getVisualizationData === "function";
+    function motionAllowed() {
+      return Boolean(paint && settings.visualizer && settings.motionEnabled && state.playing && !document.hidden && !(reducedMotion && reducedMotion.matches) && (native || measured));
+    }
+    function drawSignal(time = 0) {
+      if (!paint || !settings.visualizer || document.hidden) return;
+      const box = canvas.getBoundingClientRect();
+      if (!box.width || !box.height) return;
+      const ratio = Math.min(window.devicePixelRatio || 1, 2), w = box.width, h = box.height;
+      const width = Math.round(w * ratio), height = Math.round(h * ratio);
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      paint.setTransform(ratio, 0, 0, ratio, 0, 0);
+      const colors = getComputedStyle(document.documentElement);
+      paint.fillStyle = colors.getPropertyValue("--paper").trim();
+      paint.fillRect(0, 0, w, h);
+      paint.strokeStyle = colors.getPropertyValue("--line").trim();
+      paint.lineWidth = 0.5;
+      paint.beginPath();
+      for (let x = 0; x <= w; x += w / 6) {
+        paint.moveTo(x, 0);
+        paint.lineTo(x, h);
+      }
+      for (let y = h / 4; y < h; y += h / 4) {
+        paint.moveTo(0, y);
+        paint.lineTo(w, y);
+      }
+      paint.stroke();
+      let samples = null;
+      if (measured) try {
+        samples = engine.getVisualizationData();
+      } catch (error) {
+        samples = null;
+      }
+      paint.strokeStyle = colors.getPropertyValue("--accent").trim();
+      paint.lineWidth = 1.7;
+      paint.beginPath();
+      const count = samples && samples.length ? samples.length : 128;
+      for (let i = 0; i < count; i++) {
+        const x = i / (count - 1) * w;
+        const value = native ? settings.intensity * Math.sin(2 * Math.PI * (i / (count - 1) * settings.rateHz * 0.25 + time / 1e3)) : samples && samples.length ? (samples[i] - 128) / 128 : 0;
+        const y = h / 2 - value * h * 0.42;
+        if (i === 0) paint.moveTo(x, y);
+        else paint.lineTo(x, y);
+      }
+      paint.stroke();
+    }
+    function animateSignal(time) {
+      visualFrame = 0;
+      if (!motionAllowed()) return;
+      if (time - lastVisualTime >= 50) {
+        drawSignal(time);
+        lastVisualTime = time;
+      }
+      visualFrame = requestAnimationFrame(animateSignal);
+    }
+    function syncVisualization(force = false) {
+      const running = motionAllowed();
+      canvas.setAttribute("data-source", native ? "illustrative" : measured ? "measured" : "unavailable");
+      canvas.setAttribute("data-running", String(running));
+      const status = state.playing ? "live" : hasSession ? "paused" : "idle";
+      $("signalLabel").textContent = native ? "Modulation sketch · not output measurement / ".concat(status) : measured ? "Output waveform · software signal / ".concat(status) : "Signal display unavailable · no output analyser";
+      if (!running && visualFrame) {
+        cancelAnimationFrame(visualFrame);
+        visualFrame = 0;
+      }
+      if (force || !canvas.getAttribute("data-drawn")) {
+        drawSignal();
+        canvas.setAttribute("data-drawn", "true");
+      }
+      if (running && !visualFrame) visualFrame = requestAnimationFrame(animateSignal);
+    }
+    window.addEventListener("resize", () => syncVisualization(true));
+    if (reducedMotion) {
+      if (reducedMotion.addEventListener) reducedMotion.addEventListener("change", () => syncVisualization(true));
+      else if (reducedMotion.addListener) reducedMotion.addListener(() => syncVisualization(true));
+    }
     function announce(message, error = false) {
       if ($("playbackStatus").textContent !== message) $("playbackStatus").textContent = message;
       $("playbackStatus").classList.toggle("error", error);
     }
     function persist() {
-      if (!saveSettings(settings)) $("storageStatus").textContent = "Preferences cannot be saved in this browser. Sound still works.";
+      const saved = saveSettings(settings);
+      $("storageStatus").textContent = saved ? "" : "Preferences cannot be saved in this browser. Sound still works.";
+      if (!saved) $("uiStatus").textContent = "Applied for this visit only. Storage is unavailable.";
+      return saved;
+    }
+    const rangeKeys = ["volume", "intensity", "rateHz", "ambienceVolume", "brightness", "space", "stereo", "density", "musicVolume", "bassVolume", "melodyVolume"];
+    const styleDescriptions = { ambient: "Evolving, sustained layers.", lofi: "Soft-edged harmony with a quieter, close-up feel.", deep: "Lower, darker layers with less upper detail.", glass: "Light, bell-like notes and open space.", drift: "Longer phrases and an unhurried arrangement.", tape: "Rounded tone and gently shifting sustained notes." };
+    const uiKeys = ["theme", "uiDensity", "textScale", "motionEnabled", "visualizer"];
+    function applyPresentation() {
+      const root = document.documentElement;
+      root.setAttribute("data-theme", settings.theme);
+      root.setAttribute("data-density", settings.uiDensity);
+      root.setAttribute("data-motion", settings.motionEnabled ? "system" : "off");
+      root.style.setProperty("--text-scale", settings.textScale);
+      for (const key of uiKeys) $(key).value = String(settings[key]);
+      $("signalDisplay").hidden = !settings.visualizer;
+      document.querySelector('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue("--paper").trim();
     }
     function renderSettings() {
-      for (const key of ["duration", "volume", "intensity", "rateHz", "ambience", "ambienceVolume"]) {
+      applyPresentation();
+      for (const key of ["duration", "ambience", "synth", "seed", ...rangeKeys]) {
         const element = $(key);
         element.value = settings[key];
         if (element.type === "range") element.style.setProperty("--fill", "".concat((settings[key] - Number(element.min)) / (Number(element.max) - Number(element.min)) * 100, "%"));
       }
-      for (const key of ["volume", "intensity", "ambienceVolume"]) $(key + "Value").textContent = "".concat(Math.round(settings[key] * 100), "%");
+      for (const key of rangeKeys.filter((key2) => key2 !== "rateHz")) $(key + "Value").textContent = "".concat(Math.round(settings[key] * 100), "%");
+      $("styleHelp").textContent = styleDescriptions[settings.style];
       $("rateHzValue").textContent = "".concat(settings.rateHz, " Hz");
       document.querySelectorAll("[data-mode]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.mode === settings.mode)));
       document.querySelectorAll("[data-style]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.style === settings.style)));
@@ -552,6 +782,7 @@
       $("total").textContent = settings.duration ? " / ".concat(formatTime(settings.duration * 60)) : " / ∞";
       $("clockNote").textContent = settings.mode === "focus" && settings.rateHz === 16 ? "16 pulses per beat on a 60 BPM musical clock." : "Experimental independent modulation: the musical clock is not rate-derived. Depth 0% turns modulation off.";
       renderState();
+      syncVisualization(true);
     }
     function renderState() {
       const playing = Boolean(state.playing), elapsed = Number(state.elapsed) || 0;
@@ -567,6 +798,7 @@
       $("newSound").disabled = busy;
       $("playIcon").textContent = playing ? "Ⅱ" : "▶";
       $("stopButton").disabled = busy || !playing && !hasSession && elapsed === 0;
+      syncVisualization();
     }
     function readState() {
       try {
@@ -588,14 +820,44 @@
     }
     function update(patch) {
       settings = normalizeSettings(__spreadValues(__spreadValues({}, settings), patch));
-      persist();
-      try {
+      const saved = persist();
+      if (Object.keys(patch).some((key) => uiKeys.indexOf(key) === -1)) try {
         engine.update(settings);
       } catch (error) {
         announce(error.message, true);
       }
       renderSettings();
+      return saved;
     }
+    for (const key of uiKeys) $(key).addEventListener("change", (event) => {
+      const value = key === "textScale" ? Number(event.target.value) : ["motionEnabled", "visualizer"].indexOf(key) !== -1 ? event.target.value === "true" : event.target.value;
+      const saved = update({ [key]: value });
+      $("uiStatus").textContent = saved ? "Display preferences applied and saved on this device." : "Applied for this visit only. Storage is unavailable.";
+    });
+    $("resetUI").addEventListener("click", () => {
+      if (!window.confirm("Reset display settings to Paper, comfortable spacing and standard text? Sound settings will stay unchanged.")) return;
+      const defaults = normalizeSettings({ seed: settings.seed }), patch = {};
+      for (const key of uiKeys) patch[key] = defaults[key];
+      update(patch);
+      $("uiStatus").textContent = "Display settings reset. Your sound is unchanged.";
+    });
+    $("resetSound").addEventListener("click", () => {
+      if (!window.confirm("Reset sound settings and stop this session? This restores Focus, 25 minutes and default sound levels. Display settings will stay unchanged.")) return;
+      try {
+        engine.stop();
+        hasSession = false;
+        state = engine.getState();
+      } catch (error) {
+        announce(error.message, true);
+        return;
+      }
+      const defaults = normalizeSettings({ seed: settings.seed });
+      for (const key of uiKeys) defaults[key] = settings[key];
+      settings = defaults;
+      persist();
+      renderSettings();
+      announce("Sound settings reset. Start when you are ready.");
+    });
     $("playButton").addEventListener("click", async () => {
       if (busy) return;
       busy = true;
@@ -629,8 +891,17 @@
         announce(error.message, true);
       }
     });
-    for (const key of ["duration", "ambience"]) $(key).addEventListener("change", (event) => update({ [key]: key === "duration" ? Number(event.target.value) : event.target.value }));
-    for (const key of ["volume", "intensity", "rateHz", "ambienceVolume"]) $(key).addEventListener("input", (event) => update({ [key]: Number(event.target.value) }));
+    for (const key of ["duration", "ambience", "synth"]) $(key).addEventListener("change", (event) => update({ [key]: key === "duration" ? Number(event.target.value) : event.target.value }));
+    for (const key of rangeKeys) $(key).addEventListener("input", (event) => update({ [key]: Number(event.target.value) }));
+    $("seed").addEventListener("change", (event) => {
+      const seed = Number(event.target.value);
+      if (!Number.isSafeInteger(seed) || seed < 1) {
+        event.target.value = settings.seed;
+        announce("Use a positive whole-number seed. The current sound seed is unchanged.", true);
+        return;
+      }
+      update({ seed });
+    });
     document.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => {
       const mode = button.dataset.mode;
       update(__spreadValues({ mode }, MODE_DEFAULTS[mode]));
@@ -660,17 +931,112 @@
       }
     });
     const help = $("helpDialog");
+    help.setAttribute("role", "dialog");
+    help.setAttribute("tabindex", "-1");
+    let helpOpener = null, helpBackdrop = null;
     function openHelp() {
-      if (!help.open) help.showModal();
+      if (help.hasAttribute("open")) return;
+      helpOpener = document.activeElement;
+      document.body.classList.add("help-open");
+      if (typeof help.showModal === "function") {
+        try {
+          help.showModal();
+          $("closeHelp").focus();
+          return;
+        } catch (error) {
+        }
+      }
+      helpBackdrop = document.createElement("div");
+      helpBackdrop.className = "help-backdrop";
+      helpBackdrop.addEventListener("click", closeHelp);
+      document.body.appendChild(helpBackdrop);
+      help.classList.add("help-fallback");
+      help.setAttribute("open", "");
+      $("closeHelp").focus();
+    }
+    function closeHelp() {
+      if (typeof help.close === "function" && !help.classList.contains("help-fallback")) help.close();
+      else help.removeAttribute("open");
+      help.classList.remove("help-fallback");
+      document.body.classList.remove("help-open");
+      if (helpBackdrop) {
+        helpBackdrop.remove();
+        helpBackdrop = null;
+      }
+      if (helpOpener && typeof helpOpener.focus === "function") helpOpener.focus();
     }
     $("helpButton").addEventListener("click", openHelp);
     $("installButton").addEventListener("click", openHelp);
-    $("closeHelp").addEventListener("click", () => help.close());
+    $("closeHelp").addEventListener("click", closeHelp);
+    help.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeHelp();
+    });
     help.addEventListener("click", (event) => {
       if (event.target === help) {
         const r = help.getBoundingClientRect();
-        if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) help.close();
+        if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) closeHelp();
       }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (!help.hasAttribute("open")) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHelp();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const targets = Array.from(help.querySelectorAll("button,a,input,select,[tabindex]")).filter((element) => !element.disabled && element.getClientRects().length && element.tabIndex >= 0);
+      const first = targets[0], last = targets[targets.length - 1];
+      if (!first) {
+        event.preventDefault();
+        help.focus();
+      } else if (event.shiftKey && (document.activeElement === first || document.activeElement === help)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    document.addEventListener("focusin", (event) => {
+      const target = event.target;
+      if (window.innerWidth > 760 || help.hasAttribute("open") || !target.getBoundingClientRect || target.closest(".transport")) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement !== target) return;
+        const bottom = target.getBoundingClientRect().bottom, edge = document.querySelector(".transport").getBoundingClientRect().top;
+        if (bottom > edge - 12) window.scrollBy(0, bottom - edge + 16);
+      });
+    });
+    document.querySelectorAll(".copy-source").forEach((button) => button.addEventListener("click", async () => {
+      const url = button.parentElement.querySelector(".source-url").textContent.trim();
+      let copied = false;
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        try {
+          await navigator.clipboard.writeText(url);
+          copied = true;
+        } catch (error) {
+        }
+      }
+      if (!copied) {
+        const field = document.createElement("textarea");
+        field.value = url;
+        field.setAttribute("readonly", "");
+        field.style.cssText = "position:fixed;left:-10000px;top:0";
+        document.body.appendChild(field);
+        field.select();
+        try {
+          copied = Boolean(document.execCommand("copy"));
+        } catch (error) {
+          copied = false;
+        }
+        field.remove();
+        button.focus();
+      }
+      $("copyStatus").textContent = copied ? "Source [".concat(button.dataset.source, "] URL copied. Open it manually in an external browser.") : "Copy is unavailable. Select the printed URL and copy it manually, or type it into a browser.";
+    }));
+    document.querySelector(".desk-link").addEventListener("click", () => {
+      $("appearance").open = true;
     });
     $("aboutButton").addEventListener("click", () => {
       $("about").open = true;

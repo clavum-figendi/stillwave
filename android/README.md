@@ -1,6 +1,6 @@
 # Stillwave Android
 
-Native Java Android app: `net.stillwave.app`, version `1.0.1` (2), minimum API 26,
+Native Java Android app: `net.stillwave.app`, version `1.1.0` (3), minimum API 26,
 compile/target API 35. Java 17, Gradle wrapper 8.9 (distribution SHA-256 pinned),
 Android Gradle Plugin 8.7.3. No AndroidX or other runtime dependencies.
 
@@ -90,13 +90,19 @@ Required state fields are `{playing: boolean, elapsed: seconds}` with optional
 pause time is excluded. Short fade/drain tails after a pause are not charged.
 The service does not auto-restart audio after process death or reboot.
 
-Settings: mode `focus|relax|sleep|meditate`, palette `ambient|lofi|deep`, volume
-0–1, intensity 0–0.6, pulse rate 0.25–32 Hz, ambience `none|rain|brown`, ambience
-volume 0–1, duration exactly 0/15/25/45/60/90 minutes, positive JS-safe integer
-seed. Native accepts `rate` and the web UI's `rateHz` alias. Missing update fields
+Settings: mode `focus|relax|sleep|meditate`; style
+`ambient|lofi|deep|glass|drift|tape`; synth `sine|triangle|fm|organ`; volume 0–1,
+intensity 0–0.6, pulse rate 0.25–32 Hz; ambience
+`none|rain|brown|pink|ocean|wind|fire`, ambience volume 0–1; brightness, space,
+stereo, density, musicVolume, bassVolume and melodyVolume each 0–1; duration
+exactly 0/15/25/45/60/90 minutes; positive JS-safe integer seed.
+Native accepts `rate` and the web UI's `rateHz` alias. Missing update fields
 retain their existing values. Values are bounded, nonfinite values get defaults,
 and malformed settings produce a recoverable error rather than a crash.
-Default mode rates are 16/8/1/6 Hz and defaults match the web UI.
+Default mode rates are 16/8/1/6 Hz and defaults match the web UI. UI-only theme,
+spacing, text-size and visual-display preferences are not synthesis controls.
+Browser and native synthesis share the control contract, not bit-identical DSP.
+For a consistent fresh seed, Stop then Start after editing; resume is not a restart.
 
 ## Playback and security architecture
 
@@ -121,8 +127,10 @@ Default mode rates are 16/8/1/6 Hz and defaults match the web UI.
   Closing is asynchronous to avoid blocking the UI; the worker drains its fade,
   releases AudioTrack and exits. A paused worker waits rather than spinning.
 - `SignalGenerator` is pure Java: evolving chord pads, bass, gentle notes and
-  filtered generated noise. Sinusoidal AM acts on the low/mid pads, with separate
-  bass/air paths. Controls and frequencies interpolate, starts/resumes fade in,
+  generated textures and four crossfaded synth timbres. Sinusoidal AM acts on the
+  broad pad/melody bus, with separate bass/atmosphere paths; this is not the
+  paper's 200–1000 Hz band-limited stimulus. Controls and frequencies interpolate,
+  starts/resumes fade in,
   pauses/stops fade out and drain before pausing output. A bounded tanh output
   preserves headroom. No medical/clinical effectiveness claim is made.
 

@@ -15,6 +15,30 @@ streaming, analytics, external fonts or paid generation APIs.
 The Android update uses the same package and signing identity as the 1.0.0 test
 build. Install it over the test build to retain local app data.
 
+## Sound and interface
+
+The expanded listening workbench includes:
+
+- **Six composition styles:** Ambient, Lo-fi, Deep, Glass, Drift and Tape.
+- **Four synth voices:** Sine, Triangle, FM and Organ.
+- **Generated atmosphere:** rain-like patter, brown noise, pink noise, ocean-like
+  wash, wind-like movement and fire-like crackle, or no atmosphere. These are
+  synthesized textures, not field recordings.
+- **Sound controls:** music/bass/melody layer levels, brightness, space, stereo
+  width, note density, modulation depth/rate, master/atmosphere volume and timer.
+- **Six visual palettes:** Paper, Graphite, Moss, Sand, Dusk and Night; plus
+  comfortable/compact controls, text size, signal visibility and motion settings.
+- **Listening helpers:** separate confirmed sound/display resets, contextual
+  control notes, offline guidance, research references and development credits.
+
+The browser waveform measures software output. Android displays an explicitly
+illustrative modulation sketch, not an output or brain-activity measurement.
+Display motion respects system reduced motion and stops when paused or hidden.
+Appearance changes do not alter sound settings. Preferences remain on-device.
+Research, corrections, limitations and credits are bundled in the interface and
+[`web/RESEARCH.md`](web/RESEARCH.md), including Brain.fm author affiliations.
+The paper's band-limited experimental stimuli are **not** reproduced by this app.
+
 ## Offline use
 
 - **Web:** open the hosted app online once, use the offline-save/check control and
@@ -45,6 +69,8 @@ npm ci --prefix tests
 npm --prefix tests run build
 node --test tests/*.test.mjs
 python tests/browser_test.py
+python tests/expansion_audio_test.py
+python tests/expansion_ui_test.py
 ```
 
 Use relative paths to host under a GitHub Pages project path or at the root on
