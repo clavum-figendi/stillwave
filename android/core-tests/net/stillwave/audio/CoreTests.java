@@ -82,7 +82,8 @@ public final class CoreTests {
         check(Settings.from(Map.of("seed", 9_007_199_254_740_991L)).seed == 9_007_199_254_740_991L, "safe JS integer seed");
         check(Settings.from(Map.of("duration", -1)).duration == 25, "negative timer must not become unlimited");
         check(Settings.from(Map.of("duration", 100)).duration == 25, "unsupported long timer rejected");
-        check(defaults.intensity == .22 && defaults.ambienceVolume == .2, "shared web defaults");
+        check(defaults.intensity == .22 && defaults.ambienceVolume == .3 && defaults.synth.equals("auto"), "shared web defaults");
+        check(Settings.from(Map.of("mode", "relax")).style.equals("piano") && Settings.from(Map.of("mode", "meditate")).style.equals("drift"), "shared mode palettes");
         check(Settings.from(Map.of("mode", "sleep")).style.equals("deep"), "shared sleep palette default");
         Settings noAm = Settings.from(Map.of("intensity", 0, "rate", 1));
         SignalGenerator noAmSlow = new SignalGenerator(44100, noAm);

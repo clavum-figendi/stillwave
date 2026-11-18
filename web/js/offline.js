@@ -12,7 +12,7 @@ function ask(worker,type){
 }
 export function setupOffline({button,status}){
   if(!('serviceWorker' in navigator)||!window.isSecureContext){
-    status.textContent='Offline saving needs HTTPS and a browser with service-worker support.';
+    status.textContent='Offline saving needs HTTPS';
     button.disabled=true;return;
   }
   let registration;
@@ -26,21 +26,21 @@ export function setupOffline({button,status}){
     if(wasControlled){
       const report=await ask(ready.active,'CHECK_OFFLINE');
       if(report.ready&&Array.isArray(report.missing)&&!report.missing.length&&report.total>=12){
-        status.textContent='Ready offline · all app files verified on this device.';button.textContent='Check offline';
+        status.textContent='Ready offline';button.textContent='Check offline';
       }
     }
-  }).catch(()=>{status.textContent='Not saved yet. Connect to the internet, then choose Save offline.';});
+  }).catch(()=>{status.textContent='Not saved for offline yet';});
   button.addEventListener('click',async()=>{
-    button.disabled=true;status.textContent='Saving and checking every app asset…';status.classList.remove('error');
+    button.disabled=true;status.textContent='Saving…';status.classList.remove('error');
     try{
       const ready=await prepare();
       const report=await ask(ready.active,'SAVE_OFFLINE');
       if(!report.ready||!Array.isArray(report.missing)||report.missing.length||report.total<12)throw Error('Some app files are missing. Connect to the internet and try again.');
-      status.textContent='Ready offline · all app files verified on this device.';
+      status.textContent='Ready offline';
       button.textContent='Check offline';
       // Best effort only: persistence can be denied or later cleared by the user.
       if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{});
-    }catch(error){status.textContent=`Not ready offline. ${error.message}`;status.classList.add('error');button.textContent='Save offline';}
+    }catch(error){status.textContent=`Not ready offline: ${error.message}`;status.classList.add('error');button.textContent='Save offline';}
     finally{button.disabled=false;}
   });
 }

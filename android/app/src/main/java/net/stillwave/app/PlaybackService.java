@@ -184,7 +184,7 @@ public final class PlaybackService extends Service {
         boolean playing = requestedPlaying;
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_wave)
-                .setContentTitle("Stillwave").setContentText(playing ? "Offline soundscape · " + controls.mode : "Paused · tap play to resume")
+                .setContentTitle("Stillwave").setContentText(playing ? capitalize(controls.mode) + " · " + capitalize(controls.style) : "Paused · tap play to resume")
                 .setContentIntent(open).setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_TRANSPORT)
                 .setOngoing(playing).setOnlyAlertOnce(true).setShowWhen(false)
                 .setDeleteIntent(control(STOP, 3))
@@ -221,4 +221,5 @@ public final class PlaybackService extends Service {
         if (instance == this) instance = null;
         super.onDestroy();
     }
+    private static String capitalize(String value) { return value.isEmpty() ? value : Character.toUpperCase(value.charAt(0)) + value.substring(1); }
 }

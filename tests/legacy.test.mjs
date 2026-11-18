@@ -19,8 +19,8 @@ test('distributed bootstrap parses on the factory Chromium 61 ES2017 parser', as
   assert.match(script[1], /\bdefer\b/, 'classic bootstrap must wait for the DOM');
   assert.doesNotMatch(script[1], /type="module"/, 'no module loader is required at runtime');
 });
-test('the distributed service worker also parses as ES2017', async () => {
-  parse(await readFile(new URL('sw.js', root), 'utf8'), { ecmaVersion: 2017, sourceType: 'script' });
+test('the distributed service worker and audio worklet also parse as ES2017', async () => {
+  for (const file of ['sw.js', 'worklet.bundle.js']) parse(await readFile(new URL(file, root), 'utf8'), { ecmaVersion: 2017, sourceType: 'script' });
 });
 test('the committed bundle matches source regardless of build working directory', async () => {
   await promisify(execFile)(process.execPath, [fileURLToPath(new URL('./build-web.mjs', import.meta.url)), '--check'], {

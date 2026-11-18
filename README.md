@@ -6,8 +6,8 @@ streaming, analytics, external fonts or paid generation APIs.
 
 ## Get Stillwave
 
-- **Web app:** https://clavum-figendi.github.io/stillwave/
-- **Android 1.1.0:** signed APK in the [release](https://github.com/clavum-figendi/stillwave/releases/tag/v1.1.0).
+- **Android:** 2.0.0 builds from this source; the latest signed APK is [1.1.0](https://github.com/clavum-figendi/stillwave/releases/tag/v1.1.0).
+- **Android:** 2.0.0 builds from this source; the last signed release is 1.1.0, signed APK in the [release](https://github.com/clavum-figendi/stillwave/releases/tag/v1.1.0).
 - **Runtime evidence:** [Android 8, 10 and 15 emulator run](https://github.com/clavum-figendi/stillwave/actions/runs/43152424725),
   including cold offline start, UI controls, notification transport and screen-off
   native playback. Physical-device/OEM battery behavior is not yet measured.
@@ -17,29 +17,38 @@ build and 1.0.1 release. Install it over either to retain local app data.
 The emulator matrix tests debug APKs of the same production source; the signed
 release is independently verified for signature, permissions and bundled assets.
 
-## Sound and interface
+## What's new in 2.0
 
-The expanded listening workbench includes:
-
-- **Six composition styles:** Ambient, Lo-fi, Deep, Glass, Drift and Tape.
-- **Four synth voices:** Sine, Triangle, FM and Organ.
-- **Generated atmosphere:** rain-like patter, brown noise, pink noise, ocean-like
-  wash, wind-like movement and fire-like crackle, or no atmosphere. These are
+- **A real composer.** Every session is written live from a seed: a key and mode, chord
+  progressions from style-specific harmonic languages (bright, jazz, modal, loops), smooth
+  voice-leading, two-bar melodic motifs that return and vary (A A B A), walking or pulsing
+  bass lines, arpeggios, swung drum patterns and an energy arc that thins and builds. Long
+  sessions get new progressions and gentle key changes, so nothing loops.
+- **Ten styles with their own instruments:** Ambient (warm pads, bells), Lo-fi (electric
+  piano, walking bass, soft drums, vinyl), Piano (felt piano), Kalimba (plucked tines),
+  Pulse (minimalist phasing arpeggios), Glass (shimmering FM bells), Drift (wide modal
+  swells), Choir (formant voices), Tape (worn organ, wow and flutter) and Deep (low drones).
+  Twenty-two synthesized voices in all, plus a feedback-delay-network reverb and a
+  tempo-synced ping-pong delay.
+- **Same music everywhere.** The engine is written once in JavaScript (AudioWorklet on the
+  web) and ported line for line to Java for the Android foreground service; a parity test
+  shows both render identical output to float32 rounding.
+- **A calmer interface.** One screen: a live score of the notes being played, four modes,
+  ten styles, nine atmospheres and a single transport bar. Mixing (chords, melody, bass,
+  beat, atmosphere, tone, space, width, activity), timer, appearance and everything
+  technical (timbre, key, scale, pulse depth/rate, seed, WAV export up to 5 minutes,
+  offline, resets) live in sheets, with the technical part folded under Advanced.
+- **Atmospheres:** rain, stream, ocean, wind, fire, night, brown and pink noise. All are
   synthesized textures, not field recordings.
-- **Sound controls:** music/bass/melody layer levels, brightness, space, stereo
-  width, note density, modulation depth/rate, master/atmosphere volume and timer.
-- **Six visual palettes:** Paper, Graphite, Moss, Sand, Dusk and Night; plus
-  comfortable/compact controls, text size, signal visibility and motion settings.
-- **Listening helpers:** separate confirmed sound/display resets, contextual
-  control notes, offline guidance, research references and development credits.
+- Seven palettes (Auto follows the system), bundled Fraunces and Figtree fonts (OFL),
+  text size, motion and score toggles. v1 preferences migrate automatically.
 
-The browser waveform measures software output. Android displays an explicitly
-illustrative modulation sketch, not an output or brain-activity measurement.
-Display motion respects system reduced motion and stops when paused or hidden.
-Appearance changes do not alter sound settings. Preferences remain on-device.
-Research, corrections, limitations and credits are bundled in the interface and
-[`web/RESEARCH.md`](web/RESEARCH.md), including Brain.fm author affiliations.
-The paper's band-limited experimental stimuli are **not** reproduced by this app.
+The browser score draws the notes the engine actually triggers. On Android it is driven
+by the same composer running alongside the native engine; it is a picture of the music,
+not a measurement of output or brain activity. Display motion respects reduced motion
+and stops when paused or hidden. Research, corrections, limitations and credits are
+bundled in the interface and [`web/RESEARCH.md`](web/RESEARCH.md). The paper's
+band-limited experimental stimuli are **not** reproduced by this app.
 
 ## Offline use
 
@@ -63,17 +72,22 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory web
 
 Open http://localhost:8080. Service workers require HTTPS or localhost.
 No installation or build is required to **serve the included app**. Source modules
-are bundled into the committed classic `web/app.bundle.js` for Chromium 61 syntax
-compatibility. After editing JavaScript sources, regenerate and verify it:
+are bundled into the committed classic `web/app.bundle.js` and `web/worklet.bundle.js`
+for Chromium 61 syntax compatibility. After editing JavaScript sources, regenerate and
+verify them (details in [`tests/README.md`](tests/README.md)):
 
 ```sh
 npm ci --prefix tests
 npm --prefix tests run build
 node --test tests/*.test.mjs
 python tests/browser_test.py
-python tests/expansion_audio_test.py
-python tests/expansion_ui_test.py
+sh android/run-core-tests.sh
 ```
+
+Code map: `web/js/engine/composer.js` decides what to play, `web/js/engine/synth.js`
+renders it; their Java twins are `android/.../audio/Composer.java`, `Voice.java`,
+`Svf.java`, `Rng.java` and `SignalGenerator.java`. Change both sides together; the
+parity test fails otherwise.
 
 Use relative paths to host under a GitHub Pages project path or at the root on
 Cloudflare Pages/Vercel/Netlify. Publish **web/**, not the repository root.
@@ -81,10 +95,10 @@ Android build instructions are in `android/README.md`.
 
 ## Design
 
-The UI is shared. Browsers use Web Audio; Android passes the same locally saved
-settings through a restricted bridge to a native audio engine. A low-mid musical
-layer receives adjustable amplitude modulation while bass and other layers are
-mixed separately. All sound is generated from synthesis and procedural noise.
+The UI is shared. Browsers run the engine in an AudioWorklet (ScriptProcessor on old
+engines); Android passes the same locally saved settings through a restricted bridge to
+the Java port of the engine. The chord and melody bus receives adjustable amplitude
+modulation while bass, drums and atmosphere are mixed separately. All sound is generated from synthesis and procedural noise.
 Use comfortable volume. This is a wellness/audio experiment, not a treatment,
 and does not reproduce or validate Brain.fm's proprietary algorithms or outcomes.
 Sleep/relax/meditation labels are sound presets, not guaranteed brain states.

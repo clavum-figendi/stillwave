@@ -16,17 +16,17 @@ Stillwave uses amplitude modulation (loudness changes), not binaural beats. Head
 
 Start quietly and use whichever texture is comfortable. If the pulse distracts you, set Modulation depth to 0%. More depth is not necessarily better. Compare settings at a similar comfortable perceived loudness rather than assuming equal slider positions produce equal perceived volume. Hearing risk depends on loudness and exposure duration; WHO recommends keeping volume down and taking breaks.[2] App volume percentages cannot be converted to safe decibels without calibrated device/headphone measurements. Stop if uncomfortable and do not mask surroundings where awareness matters.
 
-Styles select compositional recipes; synths select oscillator timbres. The atmosphere sounds are synthesized approximations, not field recordings. Brightness changes the music's tone; Space changes the diffusion/reverb mix; Width sets stereo spread; Activity changes note density. Music, Bass and Notes levels balance the layers. Presets are starting points, not promises of outcomes. Stop resets the timer; Pause preserves it; New sound chooses a new procedural seed.
+Styles select compositional recipes (tempo, harmonic language, instruments, patterns and space); Timbre can replace a style's chord instrument. Music is composed live from a seed: key and mode, chord progressions, voice-led chords, recurring melodic motifs, bass lines, arpeggios and gentle drums, with an energy arc and occasional key changes. The atmosphere sounds are synthesized approximations, not field recordings. Tone changes brightness; Space changes reverb and echo; Width sets stereo spread; Activity changes how busy the music is. Chords, Melody, Bass and Beat levels balance the layers. Presets are starting points, not promises of outcomes. Stop resets the timer; Pause preserves it; New variation chooses a new seed.
 
 ## Credits and independence
 
-- Stillwave: original interface, branding, procedural compositions and Web Audio/native Java synthesis, developed for this project with Hermes Agent (Nous Research) and OpenAI coding assistance. No Brain.fm recordings, private code or branding are included. Stillwave is not affiliated with or endorsed by Brain.fm.
+- Stillwave: original interface, branding, generative composer and synthesizer (JavaScript AudioWorklet and a line-for-line Java port), developed for this project with Hermes Agent (Nous Research), OpenAI and Anthropic Claude coding assistance. No Brain.fm recordings, private code or branding are included. Stillwave is not affiliated with or endorsed by Brain.fm.
 - OpenFM by adam13331 and contributors: an MIT-licensed conceptual reference explored during initial research, not vendored into this implementation. Its README's efficacy claims are not adopted as clinical claims here.[3]
 - focusmusic by Petr Brzek: another conceptual reference explored during initial research, not vendored into Stillwave; its README identifies the project as MIT licensed.[7]
 - Browser audio uses the standard Web Audio API; MDN contributors' documentation is a technical reference, not clinical evidence.[4]
 - Android playback uses Android platform AudioTrack, a foreground playback service and MediaSession. No runtime external audio service, account or paid model API is needed.
-- Build tooling: esbuild 0.25.12 (MIT) and acorn (MIT); tests use Playwright (Apache-2.0). These are development tools, not bundled runtime libraries. Android build tooling uses Gradle and the Android Gradle Plugin.
-- Typography uses locally available Georgia and Trebuchet MS with serif/humanist sans fallbacks. Fonts are not downloaded or redistributed; appearance depends on fonts installed on the device.
+- Build tooling: esbuild 0.25.12 (MIT) and acorn (MIT); tests use Playwright (Apache-2.0) and Node's test runner. These are development tools, not bundled runtime libraries. Android build tooling uses Gradle and the Android Gradle Plugin.
+- Typography: Fraunces (The Fraunces Project Authors / Undercase Type) and Figtree (The Figtree Project Authors / Erik Kennedy), both SIL Open Font License 1.1, bundled from Fontsource with their licenses in `assets/fonts/`. No fonts are downloaded at runtime.
 - Stillwave source is MIT licensed. A copyright license does not establish third-party patent clearance.
 
 ## Privacy and offline boundary

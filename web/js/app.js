@@ -1,291 +1,280 @@
-import { MODE_DEFAULTS, normalizeSettings, loadSettings, saveSettings, formatTime } from './settings.js';
-import { NativeEngine } from './native.js';
-import { setupOffline } from './offline.js';
+import {MODE_DEFAULTS, MODES, STYLES, SYNTHS, AMBIENCES, SCALES, THEMES, DURATIONS, normalizeSettings, loadSettings, saveSettings, formatTime} from './settings.js';
+import {NativeEngine} from './native.js';
+import {StillwaveEngine, renderWav} from './audio.js';
+import {setupOffline} from './offline.js';
+import {Score, ComposerClock, WINDOW} from './score.js';
 
-// Keep asynchronous loading inside a function: factory Android WebViews cannot
-// parse top-level await. The distributed IIFE also lowers newer module syntax.
-async function bootstrap(){
-// Grid gap support does not imply flex gap (factory WebViews have the former).
-const gapProbe=document.createElement('div');gapProbe.id='flexGapProbe';
-gapProbe.style.cssText='position:absolute;visibility:hidden;display:flex;flex-direction:column;row-gap:1px';
-for(let i=0;i<2;i++){const child=document.createElement('div');child.style.height='1px';gapProbe.appendChild(child);}
-document.body.appendChild(gapProbe);
-document.documentElement.classList.toggle('no-flex-gap',gapProbe.scrollHeight!==3);
-gapProbe.remove();
-const native=Boolean(window.NativeAudio);
-const engine=native?new NativeEngine(window.NativeAudio):new (await import('./audio.js')).StillwaveEngine();
-const $ = id => document.getElementById(id);
-let settings=loadSettings(), state={playing:false,elapsed:0}, busy=false, hasSession=false;
-const descriptions={
-  focus:['Room to think','Soft layers. A steady undercurrent. Nothing to chase.'],
-  relax:['Let the edges soften','Unhurried chords, with room between every note.'],
-  sleep:['Somewhere softer','A low, slow soundscape. Let the rest wait.'],
-  meditate:['Here, for a while','An open space to listen. One moment at a time.'],
-};
-const canvas=$('signalCanvas'),paint=canvas.getContext('2d');
-const reducedMotion=window.matchMedia?window.matchMedia('(prefers-reduced-motion: reduce)'):null;
-let visualFrame=0,lastVisualTime=0;
-const measured=!native&&typeof engine.getVisualizationData==='function';
-function motionAllowed(){return Boolean(paint&&settings.visualizer&&settings.motionEnabled&&state.playing&&!document.hidden&&!(reducedMotion&&reducedMotion.matches)&&(native||measured));}
-function drawSignal(time=0){
-  if(!paint||!settings.visualizer||document.hidden)return;
-  const box=canvas.getBoundingClientRect();if(!box.width||!box.height)return;
-  const ratio=Math.min(window.devicePixelRatio||1,2),w=box.width,h=box.height;
-  const width=Math.round(w*ratio),height=Math.round(h*ratio);
-  if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
-  paint.setTransform(ratio,0,0,ratio,0,0);
-  const colors=getComputedStyle(document.documentElement);
-  paint.fillStyle=colors.getPropertyValue('--paper').trim();paint.fillRect(0,0,w,h);
-  paint.strokeStyle=colors.getPropertyValue('--line').trim();paint.lineWidth=.5;
-  paint.beginPath();
-  for(let x=0;x<=w;x+=w/6){paint.moveTo(x,0);paint.lineTo(x,h);}
-  for(let y=h/4;y<h;y+=h/4){paint.moveTo(0,y);paint.lineTo(w,y);}
-  paint.stroke();
-  let samples=null;
-  if(measured)try{samples=engine.getVisualizationData();}catch(error){samples=null;}
-  paint.strokeStyle=colors.getPropertyValue('--accent').trim();paint.lineWidth=1.7;paint.beginPath();
-  const count=samples&&samples.length?samples.length:128;
-  for(let i=0;i<count;i++){
-    const x=i/(count-1)*w;
-    // Native bridge has no output analyser. This is only the labeled AM recipe.
-    const value=native?settings.intensity*Math.sin(2*Math.PI*(i/(count-1)*settings.rateHz*.25+time/1000)):(samples&&samples.length?(samples[i]-128)/128:0);
-    const y=h/2-value*h*.42;
-    if(i===0)paint.moveTo(x,y);else paint.lineTo(x,y);
+// Factory Android WebViews cannot parse top-level await; everything runs inside bootstrap().
+function bootstrap() {
+  const $ = id => document.getElementById(id);
+  const native = Boolean(window.NativeAudio);
+  const engine = native ? new NativeEngine(window.NativeAudio) : new StillwaveEngine();
+  let settings = loadSettings(), state = {playing: false, elapsed: 0}, busy = false, hasSession = false;
+
+  const STYLE_INFO = {
+    ambient: ['Ambient', 'Slow pads and distant bells'], lofi: ['Lo-fi', 'Warm keys, soft beat'], piano: ['Piano', 'Felt piano, open harmony'],
+    kalimba: ['Kalimba', 'Bright plucked tines'], pulse: ['Pulse', 'Steady patterns for deep work'], glass: ['Glass', 'Shimmering arpeggios'],
+    drift: ['Drift', 'Wide, unhurried swells'], choir: ['Choir', 'Airy voices'], tape: ['Tape', 'Worn organ, nostalgic'], deep: ['Deep', 'Low, dark and still'],
+  };
+  const MODE_NAMES = {focus: 'Focus', relax: 'Relax', sleep: 'Sleep', meditate: 'Meditate'};
+  const AIR_NAMES = {none: 'None', rain: 'Rain', stream: 'Stream', ocean: 'Ocean', wind: 'Wind', fire: 'Fire', night: 'Night', brown: 'Brown', pink: 'Pink'};
+  const SYNTH_NAMES = {auto: 'Style’s own', sine: 'Sine', triangle: 'Triangle', warm: 'Warm pad', fm: 'FM pad', organ: 'Organ', epiano: 'Electric piano', bell: 'Bell', pluck: 'Pluck'};
+  const KEYS = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+  const THEME_NAMES = {auto: 'Auto', paper: 'Fog', sand: 'Sand', moss: 'Moss', dusk: 'Dusk', night: 'Tide', graphite: 'Graphite'};
+  const MIX = [['volume', 'i-volume', 'Volume'], ['musicVolume', 'i-chords', 'Chords'], ['melodyVolume', 'i-melody', 'Melody'], ['bassVolume', 'i-bass', 'Bass'], ['beatVolume', 'i-beat', 'Beat'], ['ambienceVolume', 'i-air', 'Atmosphere'],
+    ['brightness', 'i-tone', 'Tone'], ['space', 'i-space', 'Space'], ['stereo', 'i-width', 'Width'], ['density', 'i-density', 'Activity']];
+  const PULSE = [['intensity', 'Depth', 0, .6, .01], ['rateHz', 'Rate', .25, 32, .25]];
+  const icon = id => `<svg aria-hidden="true"><use href="#${id}"/></svg>`;
+  const option = (value, label, current) => `<option value="${value}"${String(value) === String(current) ? ' selected' : ''}>${label}</option>`;
+
+  // Build repeated controls once; values are synced in render().
+  $('styles').innerHTML = STYLES.map(style => `<button type="button" role="radio" class="style" data-style="${style}" title="${STYLE_INFO[style][1]}">${icon('s-' + style)}<span>${STYLE_INFO[style][0]}</span></button>`).join('');
+  $('airs').innerHTML = AMBIENCES.map(air => `<button type="button" role="radio" class="air" data-air="${air}">${icon('a-' + air)}<span>${AIR_NAMES[air]}</span></button>`).join('');
+  $('durations').innerHTML = DURATIONS.map(d => `<button type="button" role="radio" class="choice" data-duration="${d}">${d ? d + ' min' : 'No limit'}</button>`).join('');
+  $('themes').innerHTML = THEMES.map(theme => `<button type="button" role="radio" class="swatch" data-theme-choice="${theme}" aria-label="${THEME_NAMES[theme]} theme"><i data-swatch="${theme}"></i><span>${THEME_NAMES[theme]}</span></button>`).join('');
+  $('textScales').innerHTML = [[1, 'A'], [1.15, 'A+'], [1.3, 'A++']].map(([v, l]) => `<button type="button" role="radio" data-text-scale="${v}">${l}</button>`).join('');
+  const slider = ([key, glyph, label, min = 0, max = 1, step = .01]) => `<label class="slider">${glyph ? icon(glyph) : ''}<span class="slider-label">${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-key="${key}" id="${key}"><output id="${key}Value"></output></label>`;
+  $('sliders').innerHTML = MIX.map(slider).join('');
+  $('pulseSliders').innerHTML = PULSE.map(([key, label, min, max, step]) => slider([key, '', label, min, max, step])).join('');
+  $('synth').innerHTML = SYNTHS.map(s => option(s, SYNTH_NAMES[s])).join('');
+  $('key').innerHTML = option(-1, 'Automatic') + KEYS.map((k, i) => option(i, k)).join('');
+  $('scale').innerHTML = SCALES.map(s => option(s, s === 'auto' ? 'Automatic' : s[0].toUpperCase() + s.slice(1))).join('');
+
+  // Score: real note-ons from the web engine, a synchronized shadow composer for native audio.
+  const score = new Score($('score'));
+  const reducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  let preview = new ComposerClock(settings), shadow = native ? new ComposerClock(settings) : null, shadowBase = 0, shadowAt = 0, frame = 0, lastDraw = 0;
+  function motionAllowed() { return settings.visualizer && settings.motionEnabled && state.playing && !document.hidden && !(reducedMotion && reducedMotion.matches); }
+  function drawScore() {
+    const canvas = $('score');
+    canvas.hidden = !settings.visualizer;
+    if (!settings.visualizer) return;
+    if (!hasSession && !state.playing) { score.draw(preview.advance(WINDOW + 1), WINDOW, {idle: true}); return; }
+    if (native) {
+      const now = shadowBase + (state.playing ? (performance.now() - shadowAt) / 1000 : 0);
+      score.draw(shadow.advance(now + 1), now);
+    } else score.draw(engine.getNotes(), engine.now(), {level: engine.getLevel()});
+    canvas.setAttribute('data-drawn', String(Date.now()));
   }
-  paint.stroke();
-}
-function animateSignal(time){
-  visualFrame=0;
-  if(!motionAllowed())return;
-  if(time-lastVisualTime>=50){drawSignal(time);lastVisualTime=time;}
-  visualFrame=requestAnimationFrame(animateSignal);
-}
-function syncVisualization(force=false){
-  const running=motionAllowed();
-  canvas.setAttribute('data-source',native?'illustrative':measured?'measured':'unavailable');
-  canvas.setAttribute('data-running',String(running));
-  const status=state.playing?'live':hasSession?'paused':'idle';
-  $('signalLabel').textContent=native?`Modulation sketch · not output measurement / ${status}`:measured?`Output waveform · software signal / ${status}`:'Signal display unavailable · no output analyser';
-  if(!running&&visualFrame){cancelAnimationFrame(visualFrame);visualFrame=0;}
-  if(force||!canvas.getAttribute('data-drawn')){drawSignal();canvas.setAttribute('data-drawn','true');}
-  if(running&&!visualFrame)visualFrame=requestAnimationFrame(animateSignal);
-}
-window.addEventListener('resize',()=>syncVisualization(true));
-if(reducedMotion){
-  if(reducedMotion.addEventListener)reducedMotion.addEventListener('change',()=>syncVisualization(true));
-  else if(reducedMotion.addListener)reducedMotion.addListener(()=>syncVisualization(true));
-}
-function announce(message,error=false){
-  if($('playbackStatus').textContent!==message)$('playbackStatus').textContent=message;
-  $('playbackStatus').classList.toggle('error',error);
-}
-function persist(){
-  const saved=saveSettings(settings);
-  $('storageStatus').textContent=saved?'':'Preferences cannot be saved in this browser. Sound still works.';
-  if(!saved)$('uiStatus').textContent='Applied for this visit only. Storage is unavailable.';
-  return saved;
-}
-const rangeKeys=['volume','intensity','rateHz','ambienceVolume','brightness','space','stereo','density','musicVolume','bassVolume','melodyVolume'];
-const styleDescriptions={ambient:'Evolving, sustained layers.',lofi:'Soft-edged harmony with a quieter, close-up feel.',deep:'Lower, darker layers with less upper detail.',glass:'Light, bell-like notes and open space.',drift:'Longer phrases and an unhurried arrangement.',tape:'Rounded tone and gently shifting sustained notes.'};
-const uiKeys=['theme','uiDensity','textScale','motionEnabled','visualizer'];
-function applyPresentation(){
-  const root=document.documentElement;
-  root.setAttribute('data-theme',settings.theme);
-  root.setAttribute('data-density',settings.uiDensity);
-  root.setAttribute('data-motion',settings.motionEnabled?'system':'off');
-  root.style.setProperty('--text-scale',settings.textScale);
-  for(const key of uiKeys)$(key).value=String(settings[key]);
-  $('signalDisplay').hidden=!settings.visualizer;
-  document.querySelector('meta[name="theme-color"]').content=getComputedStyle(root).getPropertyValue('--paper').trim();
-}
-function renderSettings(){
-  applyPresentation();
-  for(const key of ['duration','ambience','synth','seed',...rangeKeys]){
-    const element=$(key);element.value=settings[key];
-    if(element.type==='range')element.style.setProperty('--fill',`${(settings[key]-Number(element.min))/(Number(element.max)-Number(element.min))*100}%`);
+  const canvas = () => $('score');
+  function animate(time) {
+    frame = 0;
+    if (!motionAllowed()) { canvas().setAttribute('data-running', 'false'); return; }
+    if (time - lastDraw > 33) { drawScore(); lastDraw = time; }
+    frame = requestAnimationFrame(animate);
   }
-  for(const key of rangeKeys.filter(key=>key!=='rateHz'))$(key+'Value').textContent=`${Math.round(settings[key]*100)}%`;
-  $('styleHelp').textContent=styleDescriptions[settings.style];
-  $('rateHzValue').textContent=`${settings.rateHz} Hz`;
-  document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===settings.mode)));
-  document.querySelectorAll('[data-style]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.style===settings.style)));
-  $('soundCategory').textContent=`${settings.mode.toUpperCase()} / ${settings.style==='lofi'?'LO-FI':settings.style.toUpperCase()}`;
-  [$('soundTitle').textContent,$('soundDescription').textContent]=descriptions[settings.mode];
-  $('total').textContent=settings.duration?` / ${formatTime(settings.duration*60)}`:' / ∞';
-  $('clockNote').textContent=settings.mode==='focus'&&settings.rateHz===16?'16 pulses per beat on a 60 BPM musical clock.':'Experimental independent modulation: the musical clock is not rate-derived. Depth 0% turns modulation off.';
-  renderState();syncVisualization(true);
-}
-function renderState(){
-  const playing=Boolean(state.playing),elapsed=Number(state.elapsed)||0;
-  document.body.classList.toggle('is-playing',playing);
-  $('elapsed').textContent=formatTime(elapsed);
-  $('progress').max=settings.duration?settings.duration*60:1;
-  $('progress').value=settings.duration?Math.min(elapsed,settings.duration*60):0;
-  $('progress').setAttribute('aria-valuetext',settings.duration?`${formatTime(elapsed)} of ${settings.duration} minutes`:`${formatTime(elapsed)} elapsed, no timer`);
-  const label=playing?'Pause session':hasSession||elapsed>0?'Resume session':'Start session';
-  $('playLabel').textContent=busy?'One moment…':label;$('playButton').setAttribute('aria-label',label);
-  $('playButton').disabled=busy;$('newSound').disabled=busy;
-  $('playIcon').textContent=playing?'Ⅱ':'▶';
-  $('stopButton').disabled=busy||(!playing&&!hasSession&&elapsed===0);
-  syncVisualization();
-}
-function readState(){
-  try{
-    const next=engine.getState();
-    const ended=hasSession&&state.playing&&!next.playing&&next.elapsed===0;
-    state=next;
-    if(next.playing){hasSession=true;announce('Playing · generated on this device.');}
-    else if(ended){hasSession=false;announce('Session complete. Take a little quiet with you.');}
-    else if(hasSession&&!next.playing&&!next.error)announce('Paused. Your place is saved.');
-    if(next.error)announce(next.error,true);
-    renderState();
-  }catch(error){announce(`Playback status unavailable: ${error.message}`,true);}
-}
-function update(patch){
-  settings=normalizeSettings({...settings,...patch});const saved=persist();
-  if(Object.keys(patch).some(key=>uiKeys.indexOf(key)===-1))try{engine.update(settings);}catch(error){announce(error.message,true);}
-  renderSettings();return saved;
-}
-for(const key of uiKeys)$(key).addEventListener('change',event=>{
-  const value=key==='textScale'?Number(event.target.value):['motionEnabled','visualizer'].indexOf(key)!==-1?event.target.value==='true':event.target.value;
-  const saved=update({[key]:value});
-  $('uiStatus').textContent=saved?'Display preferences applied and saved on this device.':'Applied for this visit only. Storage is unavailable.';
-});
-$('resetUI').addEventListener('click',()=>{
-  if(!window.confirm('Reset display settings to Paper, comfortable spacing and standard text? Sound settings will stay unchanged.'))return;
-  const defaults=normalizeSettings({seed:settings.seed}),patch={};
-  for(const key of uiKeys)patch[key]=defaults[key];
-  update(patch);$('uiStatus').textContent='Display settings reset. Your sound is unchanged.';
-});
-$('resetSound').addEventListener('click',()=>{
-  if(!window.confirm('Reset sound settings and stop this session? This restores Focus, 25 minutes and default sound levels. Display settings will stay unchanged.'))return;
-  try{engine.stop();hasSession=false;state=engine.getState();}catch(error){announce(error.message,true);return;}
-  const defaults=normalizeSettings({seed:settings.seed});
-  for(const key of uiKeys)defaults[key]=settings[key];
-  settings=defaults;persist();renderSettings();announce('Sound settings reset. Start when you are ready.');
-});
-$('playButton').addEventListener('click',async()=>{
-  if(busy)return;busy=true;renderState();
-  try{
-    if(state.playing){await engine.pause();announce('Paused. Your place is saved.');}
-    else{await engine.start(settings);hasSession=true;announce('Playing · generated on this device.');}
-    state=engine.getState();if(state.error)throw Error(state.error);
-  }catch(error){announce(error.message||'Unable to start audio. Please try again.',true);}
-  finally{busy=false;renderState();}
-});
-$('stopButton').addEventListener('click',()=>{try{engine.stop();state=engine.getState();hasSession=false;announce('Stopped. Ready for a fresh start.');renderState();}catch(error){announce(error.message,true);}});
-for(const key of ['duration','ambience','synth'])$(key).addEventListener('change',event=>update({[key]:key==='duration'?Number(event.target.value):event.target.value}));
-for(const key of rangeKeys)$(key).addEventListener('input',event=>update({[key]:Number(event.target.value)}));
-$('seed').addEventListener('change',event=>{
-  const seed=Number(event.target.value);
-  if(!Number.isSafeInteger(seed)||seed<1){event.target.value=settings.seed;announce('Use a positive whole-number seed. The current sound seed is unchanged.',true);return;}
-  update({seed});
-});
-document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>{const mode=button.dataset.mode;update({mode,...MODE_DEFAULTS[mode]});}));
-document.querySelectorAll('[data-style]').forEach(button=>button.addEventListener('click',()=>update({style:button.dataset.style})));
-$('newSound').addEventListener('click',async()=>{
-  const wasPlaying=state.playing;busy=true;
-  try{
-    engine.stop();hasSession=false;state=engine.getState();
-    settings=normalizeSettings({...settings,seed:Math.floor(Math.random()*2147483646)+1});persist();renderSettings();
-    if(wasPlaying){await engine.start(settings);hasSession=true;announce('Playing · a fresh soundscape.');}else announce('A fresh soundscape. Start when you’re ready.');
-    state=engine.getState();
-  }catch(error){announce(error.message,true);}finally{busy=false;renderState();}
-});
-const help=$('helpDialog');
-help.setAttribute('role','dialog');help.setAttribute('tabindex','-1');
-let helpOpener=null,helpBackdrop=null;
-function openHelp(){
-  if(help.hasAttribute('open'))return;
-  helpOpener=document.activeElement;
-  document.body.classList.add('help-open');
-  if(typeof help.showModal==='function'){
-    try{help.showModal();$('closeHelp').focus();return;}catch(error){/* Legacy dialog fallback below. */}
+  function syncMotion() {
+    const running = motionAllowed();
+    canvas().setAttribute('data-running', String(running));
+    canvas().setAttribute('data-source', native ? 'composer' : 'engine');
+    if (running && !frame) frame = requestAnimationFrame(animate);
+    if (!running) { if (frame) cancelAnimationFrame(frame); frame = 0; drawScore(); }
   }
-  helpBackdrop=document.createElement('div');helpBackdrop.className='help-backdrop';
-  helpBackdrop.addEventListener('click',closeHelp);document.body.appendChild(helpBackdrop);
-  help.classList.add('help-fallback');help.setAttribute('open','');$('closeHelp').focus();
-}
-function closeHelp(){
-  if(typeof help.close==='function'&&!help.classList.contains('help-fallback'))help.close();
-  else help.removeAttribute('open');
-  help.classList.remove('help-fallback');document.body.classList.remove('help-open');
-  if(helpBackdrop){helpBackdrop.remove();helpBackdrop=null;}
-  if(helpOpener&&typeof helpOpener.focus==='function')helpOpener.focus();
-}
-$('helpButton').addEventListener('click',openHelp);$('installButton').addEventListener('click',openHelp);
-$('closeHelp').addEventListener('click',closeHelp);
-help.addEventListener('cancel',event=>{event.preventDefault();closeHelp();});
-help.addEventListener('click',event=>{if(event.target===help){const r=help.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)closeHelp();}});
-document.addEventListener('keydown',event=>{
-  if(!help.hasAttribute('open'))return;
-  if(event.key==='Escape'){event.preventDefault();closeHelp();return;}
-  if(event.key!=='Tab')return;
-  const targets=Array.from(help.querySelectorAll('button,a,input,select,[tabindex]')).filter(element=>!element.disabled&&element.getClientRects().length&&element.tabIndex>=0);
-  const first=targets[0],last=targets[targets.length-1];
-  if(!first){event.preventDefault();help.focus();}
-  else if(event.shiftKey&&(document.activeElement===first||document.activeElement===help)){event.preventDefault();last.focus();}
-  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
-});
-// Fixed mobile transport must not cover a keyboard-focused control. Numeric
-// scrollBy is supported in legacy WebViews and never adds motion effects.
-document.addEventListener('focusin',event=>{
-  const target=event.target;
-  if(window.innerWidth>760||help.hasAttribute('open')||!target.getBoundingClientRect||target.closest('.transport'))return;
-  requestAnimationFrame(()=>{
-    if(document.activeElement!==target)return;
-    const bottom=target.getBoundingClientRect().bottom,edge=document.querySelector('.transport').getBoundingClientRect().top;
-    if(bottom>edge-12)window.scrollBy(0,bottom-edge+16);
+
+  function announce(message, error) { $('status').textContent = message || ''; $('status').classList.toggle('error', Boolean(error)); }
+  function persist() {
+    const saved = saveSettings(settings);
+    $('storageStatus').textContent = saved ? '' : 'Settings can’t be saved in this browser. Sound still works.';
+    return saved;
+  }
+  const pressed = (selector, attribute, value) => document.querySelectorAll(selector).forEach(el => { const on = el.getAttribute(attribute) === String(value); el.setAttribute('aria-checked', String(on)); el.classList.toggle('on', on); });
+
+  function applyTheme() {
+    const root = document.documentElement;
+    const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', settings.theme === 'auto' ? (dark ? 'night' : 'paper') : settings.theme);
+    root.style.setProperty('--text-scale', settings.textScale);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = getComputedStyle(root).getPropertyValue('--bg').trim();
+  }
+  function render() {
+    applyTheme();
+    const [name, tagline] = STYLE_INFO[settings.style];
+    $('kicker').textContent = MODE_NAMES[settings.mode]; $('title').textContent = name; $('tagline').textContent = tagline;
+    $('meta').textContent = (native ? shadow : preview).describe();
+    pressed('[data-mode]', 'data-mode', settings.mode); pressed('[data-style]', 'data-style', settings.style);
+    pressed('[data-air]', 'data-air', settings.ambience); pressed('[data-duration]', 'data-duration', settings.duration);
+    pressed('[data-theme-choice]', 'data-theme-choice', settings.theme); pressed('[data-text-scale]', 'data-text-scale', settings.textScale);
+    $('timerLabel').textContent = settings.duration ? `${settings.duration} min` : '∞';
+    $('total').textContent = settings.duration ? ` / ${formatTime(settings.duration * 60)}` : '';
+    for (const [key] of MIX.concat(PULSE)) {
+      const input = $(key); input.value = settings[key];
+      input.style.setProperty('--fill', `${(settings[key] - Number(input.min)) / (Number(input.max) - Number(input.min)) * 100}%`);
+      $(key + 'Value').textContent = key === 'rateHz' ? `${settings.rateHz} Hz` : `${Math.round(settings[key] * 100)}%`;
+    }
+    for (const key of ['synth', 'key', 'scale']) $(key).value = String(settings[key]);
+    if (document.activeElement !== $('seed')) $('seed').value = settings.seed;
+    $('motionEnabled').checked = settings.motionEnabled; $('visualizer').checked = settings.visualizer;
+    $('pulseNote').textContent = settings.intensity === 0 ? 'Pulse is off.' : settings.mode === 'focus' && settings.rateHz === 16 ? 'Gentle loudness pulses on the music at 16 Hz. Not binaural beats; works on speakers. 0% turns them off.' : 'Experimental independent modulation rate. Not binaural beats. 0% turns it off.';
+    renderState(); syncMotion();
+  }
+  function renderState() {
+    const playing = Boolean(state.playing), elapsed = Number(state.elapsed) || 0;
+    document.body.classList.toggle('is-playing', playing);
+    $('elapsed').textContent = formatTime(elapsed);
+    $('progress').style.width = settings.duration ? `${Math.min(100, elapsed / (settings.duration * 60) * 100)}%` : '0%';
+    const label = busy ? 'One moment' : playing ? 'Pause' : hasSession || elapsed > 0 ? 'Resume' : 'Play';
+    $('playButton').setAttribute('aria-label', label); $('playButton').disabled = busy;
+    $('playIcon').innerHTML = `<use href="#i-${playing ? 'pause' : 'play'}"/>`;
+    $('stopButton').disabled = busy || (!playing && !hasSession && elapsed === 0);
+    $('newSound').disabled = busy;
+  }
+  function readState() {
+    try {
+      const next = engine.getState(), ended = hasSession && state.playing && !next.playing && next.elapsed === 0;
+      if (native) { shadowBase = next.elapsed; shadowAt = performance.now(); }
+      state = next;
+      if (next.playing) hasSession = true;
+      else if (ended) { hasSession = false; announce('Session complete.'); resetScore(); }
+      if (next.error) announce(next.error, true);
+      renderState(); syncMotion();
+    } catch (error) { announce(`Playback status unavailable: ${error.message}`, true); }
+  }
+  function resetScore() { preview = new ComposerClock(settings); if (shadow) { shadow.reset(settings); shadowBase = 0; shadowAt = performance.now(); } }
+  function update(patch, soundChange = true) {
+    settings = normalizeSettings(Object.assign({}, settings, patch));
+    persist();
+    if (soundChange) {
+      try { engine.update(settings); } catch (error) { announce(error.message, true); }
+      preview = new ComposerClock(settings);
+      if (shadow) shadow.update(settings);
+    }
+    render();
+  }
+
+  async function togglePlay() {
+    if (busy) return;
+    busy = true; renderState();
+    try {
+      if (state.playing) await engine.pause();
+      else {
+        if (!hasSession && shadow) { shadow.reset(settings); shadowBase = 0; }
+        await engine.start(settings); hasSession = true; announce('');
+      }
+      state = engine.getState();
+      if (native) { shadowBase = state.elapsed; shadowAt = performance.now(); }
+      if (state.error) throw Error(state.error);
+    } catch (error) { announce(error.message || 'Sound could not start. Try again.', true); }
+    busy = false; renderState(); syncMotion();
+  }
+  function stop() {
+    try { engine.stop(); state = engine.getState(); hasSession = false; resetScore(); announce(''); render(); }
+    catch (error) { announce(error.message, true); }
+  }
+
+  // Sheets: native <dialog> with a simple fallback for engines without showModal.
+  let opener = null;
+  function openSheet(id) {
+    const sheet = $(id); opener = document.activeElement;
+    if (typeof sheet.showModal === 'function') { try { sheet.showModal(); } catch (error) { sheet.setAttribute('open', ''); } } else sheet.setAttribute('open', '');
+    const first = sheet.querySelector('[data-close]'); if (first) first.focus();
+  }
+  function closeSheet(sheet) {
+    if (typeof sheet.close === 'function') { try { sheet.close(); } catch (error) { sheet.removeAttribute('open'); } } else sheet.removeAttribute('open');
+    if (opener && opener.focus) opener.focus();
+  }
+  document.querySelectorAll('dialog.sheet').forEach(sheet => {
+    sheet.addEventListener('click', event => {
+      if (event.target.closest('[data-close]')) { closeSheet(sheet); return; }
+      if (event.target === sheet) { const r = sheet.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) closeSheet(sheet); }
+    });
+    sheet.addEventListener('cancel', event => { event.preventDefault(); closeSheet(sheet); });
   });
-});
-document.querySelectorAll('.copy-source').forEach(button=>button.addEventListener('click',async()=>{
-  const url=button.parentElement.querySelector('.source-url').textContent.trim();
-  let copied=false;
-  if(navigator.clipboard&&typeof navigator.clipboard.writeText==='function'){
-    try{await navigator.clipboard.writeText(url);copied=true;}catch(error){/* Try the legacy user-gesture copy path. */}
+  document.addEventListener('keydown', event => {
+    const open = document.querySelector('dialog.sheet[open]');
+    if (open && event.key === 'Escape') { event.preventDefault(); closeSheet(open); return; }
+    if (!open && event.key === ' ' && !event.target.closest('input,select,textarea,button,summary')) { event.preventDefault(); togglePlay(); }
+  });
+
+  // Delegated choices.
+  document.addEventListener('click', event => {
+    const el = event.target.closest('[data-mode],[data-style],[data-air],[data-duration],[data-theme-choice],[data-text-scale]');
+    if (!el) return;
+    if (el.dataset.mode) { const mode = el.dataset.mode; update(Object.assign({mode}, MODE_DEFAULTS[mode])); }
+    else if (el.dataset.style) update({style: el.dataset.style});
+    else if (el.dataset.air) update({ambience: el.dataset.air});
+    else if (el.dataset.duration !== undefined) { update({duration: Number(el.dataset.duration)}); closeSheet($('timerSheet')); }
+    else if (el.dataset.themeChoice) update({theme: el.dataset.themeChoice}, false);
+    else if (el.dataset.textScale) update({textScale: Number(el.dataset.textScale)}, false);
+  });
+  for (const [key] of MIX.concat(PULSE)) $(key).addEventListener('input', event => update({[key]: Number(event.target.value)}));
+  for (const key of ['synth', 'key', 'scale']) $(key).addEventListener('change', event => update({[key]: key === 'key' ? Number(event.target.value) : event.target.value}));
+  $('motionEnabled').addEventListener('change', event => update({motionEnabled: event.target.checked}, false));
+  $('visualizer').addEventListener('change', event => update({visualizer: event.target.checked}, false));
+  $('seed').addEventListener('change', event => {
+    const seed = Number(event.target.value);
+    if (!Number.isSafeInteger(seed) || seed < 1) { event.target.value = settings.seed; announce('Use a positive whole number for the seed.', true); return; }
+    update({seed});
+  });
+  $('playButton').addEventListener('click', togglePlay);
+  $('stopButton').addEventListener('click', stop);
+  $('newSound').addEventListener('click', async () => {
+    const wasPlaying = state.playing;
+    busy = true;
+    try {
+      engine.stop(); hasSession = false; state = engine.getState();
+      settings = normalizeSettings(Object.assign({}, settings, {seed: Math.floor(Math.random() * 2147483646) + 1})); persist();
+      resetScore(); render();
+      if (wasPlaying) { if (native) await new Promise(r => setTimeout(r, 120)); await engine.start(settings); hasSession = true; state = engine.getState(); }
+      announce('A new variation.');
+    } catch (error) { announce(error.message, true); }
+    busy = false; render();
+  });
+  $('mixerButton').addEventListener('click', () => openSheet('mixerSheet'));
+  $('timerButton').addEventListener('click', () => openSheet('timerSheet'));
+  $('settingsButton').addEventListener('click', () => openSheet('settingsSheet'));
+  $('infoButton').addEventListener('click', () => openSheet('infoSheet'));
+  $('resetSound').addEventListener('click', () => {
+    if (!window.confirm('Reset sound settings and stop? Your look stays the same.')) return;
+    stop();
+    const look = {theme: settings.theme, textScale: settings.textScale, motionEnabled: settings.motionEnabled, visualizer: settings.visualizer, seed: settings.seed};
+    settings = normalizeSettings(look); persist(); resetScore(); render(); announce('Sound settings reset.');
+  });
+  $('resetUI').addEventListener('click', () => update({theme: 'auto', textScale: 1, motionEnabled: true, visualizer: true}, false));
+  document.querySelectorAll('.copy-source').forEach(button => button.addEventListener('click', () => {
+    const url = button.parentElement.querySelector('.source-url').textContent.trim();
+    const done = copied => { $('copyStatus').textContent = copied ? `Source ${button.dataset.source} copied. Open it in a browser.` : 'Copy unavailable. Select the address to copy it.'; };
+    const fallback = () => {
+      const field = document.createElement('textarea'); field.value = url; field.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(field); field.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (error) { ok = false; } field.remove(); done(ok);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(() => done(true), fallback); else fallback();
+  }));
+
+  let installEvent = null;
+  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installEvent = event; $('installPrompt').hidden = false; });
+  $('installPrompt').addEventListener('click', () => { if (installEvent) { installEvent.prompt(); installEvent = null; $('installPrompt').hidden = true; } });
+
+  $('exportButton').addEventListener('click', async () => {
+    const seconds = Number($('exportLength').value);
+    $('exportButton').disabled = true; $('exportStatus').textContent = 'Composing your recording…';
+    try {
+      const blob = await renderWav(settings, seconds, {onProgress: p => { $('exportStatus').textContent = `Composing… ${Math.round(p * 100)}%`; }});
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = `stillwave-${settings.style}-${settings.seed}.wav`; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      $('exportStatus').textContent = 'Saved. A fresh rendering with your current settings.';
+    } catch (error) { $('exportStatus').textContent = `Couldn’t save: ${error.message}`; }
+    $('exportButton').disabled = false;
+  });
+
+  if (native) {
+    $('offlineStatus').textContent = 'Built in · works offline';
+    $('offlineButton').hidden = true;
+    $('exportButton').disabled = true; $('exportStatus').textContent = 'Recording export is available in the web version.';
+  } else setupOffline({button: $('offlineButton'), status: $('offlineStatus')});
+
+  if (window.matchMedia) {
+    const scheme = window.matchMedia('(prefers-color-scheme: dark)'), onScheme = () => render();
+    if (scheme.addEventListener) scheme.addEventListener('change', onScheme); else if (scheme.addListener) scheme.addListener(onScheme);
+    if (reducedMotion) { if (reducedMotion.addEventListener) reducedMotion.addEventListener('change', syncMotion); else if (reducedMotion.addListener) reducedMotion.addListener(syncMotion); }
   }
-  if(!copied){
-    const field=document.createElement('textarea');field.value=url;field.setAttribute('readonly','');field.style.cssText='position:fixed;left:-10000px;top:0';
-    document.body.appendChild(field);field.select();
-    try{copied=Boolean(document.execCommand('copy'));}catch(error){copied=false;}
-    field.remove();button.focus();
-  }
-  $('copyStatus').textContent=copied?`Source [${button.dataset.source}] URL copied. Open it manually in an external browser.`:'Copy is unavailable. Select the printed URL and copy it manually, or type it into a browser.';
-}));
-document.querySelector('.desk-link').addEventListener('click',()=>{$('appearance').open=true;});
-$('aboutButton').addEventListener('click',()=>{$('about').open=true;$('about').querySelector('summary').focus();});
-let installEvent;
-window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installEvent=event;$('installPrompt').hidden=false;});
-$('installPrompt').addEventListener('click',async()=>{if(installEvent){await installEvent.prompt();await installEvent.userChoice;installEvent=null;$('installPrompt').hidden=true;}});
-$('exportButton').addEventListener('click',async()=>{
-  $('exportButton').disabled=true;$('exportStatus').textContent='Rendering a fresh 30-second preview on your device…';
-  try{
-    const {renderAudio}=await import('./audio.js');
-    const buffer=await renderAudio(settings,30),channels=buffer.numberOfChannels,length=buffer.length;
-    const bytes=new ArrayBuffer(44+length*channels*2),view=new DataView(bytes);
-    const text=(offset,value)=>{for(let i=0;i<value.length;i++)view.setUint8(offset+i,value.charCodeAt(i));};
-    text(0,'RIFF');view.setUint32(4,bytes.byteLength-8,true);text(8,'WAVE');text(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,channels,true);view.setUint32(24,buffer.sampleRate,true);view.setUint32(28,buffer.sampleRate*channels*2,true);view.setUint16(32,channels*2,true);view.setUint16(34,16,true);text(36,'data');view.setUint32(40,bytes.byteLength-44,true);
-    const data=Array.from({length:channels},(_,ch)=>buffer.getChannelData(ch));
-    for(let i=0;i<length;i++)for(let ch=0;ch<channels;ch++){const sample=Math.max(-1,Math.min(1,data[ch][i]));view.setInt16(44+(i*channels+ch)*2,sample<0?sample*32768:sample*32767,true);}
-    const url=URL.createObjectURL(new Blob([bytes],{type:'audio/wav'}));const link=document.createElement('a');link.href=url;link.download=`stillwave-${settings.mode}-${settings.seed}.wav`;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
-    $('exportStatus').textContent='30-second WAV ready. This preview is not a recording of your live session.';
-  }catch(error){$('exportStatus').textContent=`Export failed: ${error.message}`;}
-  finally{$('exportButton').disabled=false;}
-});
-if(native){
-  $('offlineStatus').textContent='Bundled · ready offline';
-  $('offlineDescription').textContent='The app and sound generator are bundled. Even your first launch can be offline.';
-  $('offlineButton').disabled=true;$('offlineButton').textContent='Included in app';
-  $('exportButton').disabled=true;$('exportButton').title='WAV export is available in the web version, not in this native audio service.';
-  $('exportStatus').textContent='Native playback · WAV export unavailable in this build.';
-}else{
-  setupOffline({button:$('offlineButton'),status:$('offlineStatus')});
+  window.addEventListener('resize', () => drawScore());
+  document.addEventListener('visibilitychange', () => { readState(); syncMotion(); });
+  render(); persist(); readState(); setInterval(readState, native ? 1000 : 500);
+  window.__stillwaveReady = true;
 }
-renderSettings();persist();readState();setInterval(readState,1000);document.addEventListener('visibilitychange',readState);
-window.__stillwaveReady=true;
+try { bootstrap(); } catch (error) {
+  const status = document.getElementById('status');
+  if (status) { status.textContent = `Stillwave couldn’t start: ${error.message}`; status.classList.add('error'); }
 }
-bootstrap().catch(error=>{
-  const status=document.getElementById('playbackStatus');
-  status.textContent=`Unable to initialize Stillwave: ${error.message}`;
-  status.classList.add('error');
-});

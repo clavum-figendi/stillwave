@@ -27,17 +27,17 @@ public final class ExpansionTests {
     }
     static double peak(float[] a) {double p=0;boolean finite=true;for(float x:a){finite &= Float.isFinite(x);p=Math.max(p,Math.abs(x));}check(finite,"finite rendered signal");return p;}
     static void layers() {
-        float[] reference=render(Map.of());
-        for(String key:new String[]{"musicVolume","bassVolume","melodyVolume","brightness","space","stereo","density"})
-            check(difference(reference,render(Map.of(key,key.equals("space")?1:0)))>.00005,"audible control "+key);
+        float[] reference=render(Map.of("style","lofi"));
+        for(String key:new String[]{"musicVolume","bassVolume","melodyVolume","beatVolume","brightness","space","stereo","density"})
+            check(difference(reference,render(Map.of("style","lofi",key,key.equals("space")?1:0)))>.00005,"audible control "+key);
         float[] mono=render(Map.of("stereo",0,"space",1));boolean same=true;
         for(int i=0;i<mono.length;i+=2)same &= mono[i]==mono[i+1];check(same,"true mono including reverb");
-        check(peak(render(Map.of("musicVolume",0,"bassVolume",0,"melodyVolume",0,"space",1)))==0,"zero layers exact silence");
+        check(peak(render(Map.of("musicVolume",0,"bassVolume",0,"melodyVolume",0,"beatVolume",0,"space",1)))==0,"zero layers exact silence");
     }
     static void families() {
-        family("style",new String[]{"ambient","lofi","deep","glass","drift","tape"},Map.of());
-        family("synth",new String[]{"sine","triangle","fm","organ"},Map.of());
-        family("ambience",new String[]{"rain","brown","pink","ocean","wind","fire"},Map.of("musicVolume",0,"bassVolume",0,"melodyVolume",0,"ambienceVolume",1));
+        family("style",Settings.STYLES,Map.of());
+        family("synth",java.util.Arrays.copyOfRange(Settings.SYNTHS,1,Settings.SYNTHS.length),Map.of());
+        family("ambience",java.util.Arrays.copyOfRange(Settings.AMBIENCES,1,Settings.AMBIENCES.length),Map.of("musicVolume",0,"bassVolume",0,"melodyVolume",0,"beatVolume",0,"ambienceVolume",1));
     }
     static void family(String key,String[] choices,Map<String,Object> base) {
         float[][] signals=new float[choices.length][];
@@ -59,7 +59,7 @@ public final class ExpansionTests {
         boolean mono=true;for(int i=48000;i<audio.length;i+=2)mono &= audio[i]==audio[i+1];check(mono,"stereo to exact mono settles within one second");
         g.setSettings(Settings.from(Map.of("volume",0,"ambience","fire","ambienceVolume",1)));g.render(audio,48000);
         boolean silent=true;for(int i=48000;i<audio.length;i++)silent &= audio[i]==0;check(silent,"mute settles to exact silence");
-        g.setSettings(Settings.from(Map.of("musicVolume",0,"bassVolume",0,"melodyVolume",0,"space",1)));g.render(audio,48000);
+        g.setSettings(Settings.from(Map.of("musicVolume",0,"bassVolume",0,"melodyVolume",0,"beatVolume",0,"space",1)));g.render(audio,48000);
         silent=true;for(int i=48000;i<audio.length;i++)silent &= audio[i]==0;check(silent,"muted layers settle without reverb residue");
     }
     static double modulationDepth(float[] audio) {
@@ -71,24 +71,27 @@ public final class ExpansionTests {
     }
     private static final double TAU16=2*Math.PI*16;
     static void modulation() {
-        double off=modulationDepth(render(Map.of("musicVolume",1,"bassVolume",0,"melodyVolume",0,"intensity",0)));
-        double on=modulationDepth(render(Map.of("musicVolume",1,"bassVolume",0,"melodyVolume",0,"intensity",.6)));
+        double off=modulationDepth(render(Map.of("musicVolume",1,"bassVolume",0,"melodyVolume",0,"beatVolume",0,"intensity",0)));
+        double on=modulationDepth(render(Map.of("musicVolume",1,"bassVolume",0,"melodyVolume",0,"beatVolume",0,"intensity",.6)));
         check(on>.12&&on>off*5,"measured default 16 Hz AM depth");
         System.out.printf(java.util.Locale.ROOT,"Native measured 16 Hz depth: off=%.5f on=%.5f%n",off,on);
     }
     static void settings() {
         Map<String,Object> defaults = Settings.from(Map.of()).toMap();
-        check("sine".equals(defaults.get("synth")), "default sine synth");
-        String[] keys={"brightness","space","stereo","density","musicVolume","bassVolume","melodyVolume"};
-        double[] values={.5,.25,.65,.5,.8,.5,.5};
+        check("auto".equals(defaults.get("synth")), "default style instruments");
+        check(Integer.valueOf(-1).equals(defaults.get("key")) && "auto".equals(defaults.get("scale")), "automatic key and scale");
+        check(Settings.from(Map.of("key",7)).key==7 && Settings.from(Map.of("key",12)).key==-1 && Settings.from(Map.of("key",2.5)).key==-1, "key validation");
+        String[] keys={"brightness","space","stereo","density","musicVolume","bassVolume","melodyVolume","beatVolume"};
+        double[] values={.5,.35,.65,.5,.8,.5,.5,.5};
         for(int i=0;i<keys.length;i++) {
             check(Double.valueOf(values[i]).equals(defaults.get(keys[i])),"shared default " + keys[i]);
             check(Double.valueOf(0).equals(Settings.from(Map.of(keys[i],-1)).toMap().get(keys[i])),"clamp " + keys[i]);
             check(Double.valueOf(values[i]).equals(Settings.from(Map.of(keys[i],Double.NaN)).toMap().get(keys[i])),"finite " + keys[i]);
         }
-        for(String style:new String[]{"ambient","lofi","deep","glass","drift","tape"}) check(Settings.from(Map.of("style",style)).style.equals(style),"style "+style);
-        for(String synth:new String[]{"sine","triangle","fm","organ"}) check(synth.equals(Settings.from(Map.of("synth",synth)).toMap().get("synth")),"synth "+synth);
-        for(String ambience:new String[]{"none","rain","brown","pink","ocean","wind","fire"}) check(Settings.from(Map.of("ambience",ambience)).ambience.equals(ambience),"ambience "+ambience);
+        for(String style:Settings.STYLES) check(Settings.from(Map.of("style",style)).style.equals(style),"style "+style);
+        for(String synth:Settings.SYNTHS) check(synth.equals(Settings.from(Map.of("synth",synth)).toMap().get("synth")),"synth "+synth);
+        for(String ambience:Settings.AMBIENCES) check(Settings.from(Map.of("ambience",ambience)).ambience.equals(ambience),"ambience "+ambience);
+        for(String scale:Settings.SCALES) check(Settings.from(Map.of("scale",scale)).scale.equals(scale),"scale "+scale);
         Map<String,Object> partial=new HashMap<>(Settings.from(Map.of("synth","fm","density",.9,"mode","sleep")).toMap());
         partial.put("volume",.2); Settings merged=Settings.from(partial);
         check(merged.mode.equals("sleep") && "fm".equals(merged.toMap().get("synth")) && Double.valueOf(.9).equals(merged.toMap().get("density")),"partial update preserves expanded controls");

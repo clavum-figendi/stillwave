@@ -60,7 +60,7 @@ public final class OfflineInstrumentation extends Instrumentation {
         long deadline = SystemClock.elapsedRealtime() + 30000;
         // about:blank can initially report complete before loadUrl commits. Wait
         // for the actual bundled URL and initialized player, not that first state.
-        String initialized = "location.href==='" + MainActivity.HOME + "' && document.readyState==='complete' && window.__stillwaveReady===true && !document.getElementById('playButton').disabled && document.getElementById('offlineStatus').textContent.indexOf('Bundled')>=0";
+        String initialized = "location.href==='" + MainActivity.HOME + "' && document.readyState==='complete' && window.__stillwaveReady===true && !document.getElementById('playButton').disabled && document.getElementById('offlineStatus').textContent.indexOf('Built in')>=0";
         while (!"true".equals(evaluate(web, initialized)) && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100);
         if (!"true".equals(evaluate(web, initialized))) {
             throw new AssertionError("Bundled JavaScript initialized the live UI offline: " + evaluate(web, "location.href"));
@@ -70,9 +70,9 @@ public final class OfflineInstrumentation extends Instrumentation {
         // Exercise expanded settings through the real DOM event handlers before
         // the first offline playback. Reflection below observes validated service
         // controls, not a JavaScript bridge stub or saved UI-only preferences.
-        String expansionSetup = "(function(){var keys={synth:'fm',ambience:'ocean',brightness:.18,space:.7,stereo:0,density:.8,musicVolume:.65,bassVolume:.2,melodyVolume:.4};var style=document.querySelector('[data-style=glass]');if(!style)return false;style.click();for(var key in keys){var el=document.getElementById(key);if(!el)return false;el.value=String(keys[key]);el.dispatchEvent(new Event(el.type==='range'?'input':'change'));}return true;})()";
+        String expansionSetup = "(function(){var keys={synth:'fm',brightness:.18,space:.7,stereo:0,density:.8,musicVolume:.65,bassVolume:.2,melodyVolume:.4,beatVolume:.3};var style=document.querySelector('[data-style=glass]'),air=document.querySelector('[data-air=ocean]');if(!style||!air)return false;style.click();air.click();for(var key in keys){var el=document.getElementById(key);if(!el)return false;el.value=String(keys[key]);el.dispatchEvent(new Event(el.type==='range'?'input':'change'));}return true;})()";
         require("true".equals(evaluate(web, expansionSetup)), "Expanded offline sound controls exist and handle input");
-        evaluate(web, "document.getElementById('duration').value='0'; document.getElementById('duration').dispatchEvent(new Event('change')); document.getElementById('volume').value='0.25'; document.getElementById('volume').dispatchEvent(new Event('input')); document.getElementById('playButton').click(); true");
+        evaluate(web, "document.querySelectorAll('[data-duration]')[0].click(); document.getElementById('volume').value='0.25'; document.getElementById('volume').dispatchEvent(new Event('input')); document.getElementById('playButton').click(); true");
         deadline = SystemClock.elapsedRealtime() + 8000;
         while (!new JSONObject(PlaybackService.stateJson()).optBoolean("playing") && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(100);
         SystemClock.sleep(1200);
